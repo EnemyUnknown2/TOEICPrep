@@ -64,10 +64,40 @@ async function fetchDefinition(term) {
   };
 }
 
+// ---------- 문법: 내장 TOEIC 문법 데이터셋에서 검색 ----------
+function normalizeGrammarTerm(str) {
+  return str.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function findLocalGrammar(term) {
+  const target = normalizeGrammarTerm(term);
+  if (!target) return null;
+
+  for (const entry of TOEIC_GRAMMAR) {
+    if (entry.keywords.some((k) => normalizeGrammarTerm(k) === target)) return entry;
+  }
+  for (const entry of TOEIC_GRAMMAR) {
+    if (entry.keywords.some((k) => {
+      const nk = normalizeGrammarTerm(k);
+      return nk.includes(target) || target.includes(nk);
+    })) return entry;
+  }
+  return null;
+}
+
+async function fetchGrammarInfo(term) {
+  const local = typeof TOEIC_GRAMMAR !== "undefined" ? findLocalGrammar(term) : null;
+  if (local) {
+    return { meaningKo: local.explanation, meaning: "", example: local.example || "" };
+  }
+  // 데이터셋에 없으면 영어 단일 용어(gerund 등)로 간주하고 사전 API로 보조 검색
+  return await fetchDefinition(term);
+}
+
 // ---------- 항목 추가 ----------
 async function addEntry(kind, term) {
   const entries = state[kind];
-  const info = await fetchDefinition(term);
+  const info = kind === "grammar" ? await fetchGrammarInfo(term) : await fetchDefinition(term);
   entries.push({
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     term,

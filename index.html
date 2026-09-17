@@ -39,10 +39,10 @@
     <!-- 문법 -->
     <section id="grammar" class="tab-panel">
       <form class="add-form" id="grammar-form">
-        <input type="text" id="grammar-input" placeholder="문법 키워드를 입력하세요 (예: gerund)" required>
+        <input type="text" id="grammar-input" placeholder="문법 키워드를 입력하세요 (예: 조동사 + 동사원형)" required>
         <button type="submit">추가</button>
       </form>
-      <p class="hint">추가하면 한국어 뜻과 영어 설명을 자동으로 찾아옵니다. 찾지 못하면 직접 입력해 주세요.</p>
+      <p class="hint">TOEIC에 자주 나오는 문법 패턴(예: "조동사 + 동사원형", "가정법", "관계대명사")을 입력하면 내장된 설명을 찾아옵니다. 찾지 못하면 직접 입력해 주세요.</p>
       <div class="toolbar">
         <button id="grammar-export">CSV 내보내기</button>
         <label class="file-btn">
@@ -72,6 +72,7 @@
     </section>
   </main>
 
+  <script src="grammar-data.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
