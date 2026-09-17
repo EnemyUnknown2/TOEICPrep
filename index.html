@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TOEIC 준비</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>TOEIC 준비</h1>
+    <p class="subtitle">모르는 단어/숙어와 문법을 정리하고 이해도를 확인하세요</p>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="words">단어 및 숙어</button>
+    <button class="tab-btn" data-tab="grammar">문법</button>
+    <button class="tab-btn" data-tab="dashboard">진행 상황</button>
+  </nav>
+
+  <main>
+    <!-- 단어 및 숙어 -->
+    <section id="words" class="tab-panel active">
+      <form class="add-form" id="words-form">
+        <input type="text" id="words-input" placeholder="단어 또는 숙어를 입력하세요" required>
+        <button type="submit">추가</button>
+      </form>
+      <p class="hint">추가하면 사전에서 뜻과 예문을 자동으로 찾아옵니다. 찾지 못하면 직접 입력해 주세요.</p>
+      <div class="toolbar">
+        <button id="words-export">CSV 내보내기</button>
+        <label class="file-btn">
+          CSV 불러오기
+          <input type="file" id="words-import" accept=".csv" hidden>
+        </label>
+      </div>
+      <ul class="entry-list" id="words-list"></ul>
+    </section>
+
+    <!-- 문법 -->
+    <section id="grammar" class="tab-panel">
+      <form class="add-form" id="grammar-form">
+        <input type="text" id="grammar-input" placeholder="문법 키워드를 입력하세요 (예: gerund)" required>
+        <button type="submit">추가</button>
+      </form>
+      <p class="hint">추가하면 사전에서 설명을 자동으로 찾아옵니다. 찾지 못하면 직접 입력해 주세요.</p>
+      <div class="toolbar">
+        <button id="grammar-export">CSV 내보내기</button>
+        <label class="file-btn">
+          CSV 불러오기
+          <input type="file" id="grammar-import" accept=".csv" hidden>
+        </label>
+      </div>
+      <ul class="entry-list" id="grammar-list"></ul>
+    </section>
+
+    <!-- 진행 상황 -->
+    <section id="dashboard" class="tab-panel">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h3>단어 및 숙어</h3>
+          <p class="stat-total" id="words-total">0개</p>
+          <div class="progress-bar"><div class="progress-fill" id="words-progress"></div></div>
+          <div class="status-breakdown" id="words-breakdown"></div>
+        </div>
+        <div class="stat-card">
+          <h3>문법</h3>
+          <p class="stat-total" id="grammar-total">0개</p>
+          <div class="progress-bar"><div class="progress-fill" id="grammar-progress"></div></div>
+          <div class="status-breakdown" id="grammar-breakdown"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
