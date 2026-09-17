@@ -24,7 +24,7 @@ const state = {
 };
 
 // ---------- 사전 API로 자동 정보 조회 ----------
-async function fetchDefinition(term) {
+async function fetchEnglishDefinition(term) {
   try {
     const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(term)}`);
     if (!res.ok) return null;
@@ -41,6 +41,29 @@ async function fetchDefinition(term) {
   }
 }
 
+// MyMemory 번역 API로 한국어 뜻 조회 (무료, API 키 불필요)
+async function fetchKoreanMeaning(term) {
+  try {
+    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(term)}&langpair=en|ko`);
+    if (!res.ok) return "";
+    const data = await res.json();
+    if (data?.responseStatus !== 200) return "";
+    return (data?.responseData?.translatedText || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function fetchDefinition(term) {
+  const [dict, meaningKo] = await Promise.all([fetchEnglishDefinition(term), fetchKoreanMeaning(term)]);
+  if (!dict && !meaningKo) return null;
+  return {
+    meaningKo,
+    meaning: dict?.meaning || "",
+    example: dict?.example || "",
+  };
+}
+
 // ---------- 항목 추가 ----------
 async function addEntry(kind, term) {
   const entries = state[kind];
@@ -48,6 +71,7 @@ async function addEntry(kind, term) {
   entries.push({
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     term,
+    meaningKo: info?.meaningKo || "",
     meaning: info?.meaning || "",
     example: info?.example || "",
     status: "none",
@@ -88,7 +112,9 @@ function render(kind) {
             <button class="delete-btn" data-id="${entry.id}" title="삭제">✕</button>
           </div>
         </div>
-        ${entry.meaning ? `<p class="entry-meaning">${escapeHtml(entry.meaning)}</p>` : `<p class="entry-meaning" style="color:var(--muted)">뜻을 찾지 못했습니다. 메모에 직접 입력해 주세요.</p>`}
+        ${entry.meaningKo ? `<p class="entry-meaning-ko">${escapeHtml(entry.meaningKo)}</p>` : ""}
+        ${entry.meaning ? `<p class="entry-meaning">${escapeHtml(entry.meaning)}</p>` : ""}
+        ${!entry.meaningKo && !entry.meaning ? `<p class="entry-meaning" style="color:var(--muted)">뜻을 찾지 못했습니다. 메모에 직접 입력해 주세요.</p>` : ""}
         ${entry.example ? `<p class="entry-example">${escapeHtml(entry.example)}</p>` : ""}
         <textarea class="entry-note" placeholder="메모 (이해 안 되는 부분 등)" data-id="${entry.id}">${escapeHtml(entry.note)}</textarea>
       `;
@@ -152,7 +178,7 @@ function renderDashboard() {
 
 // ---------- CSV 내보내기 / 불러오기 ----------
 function toCsv(entries) {
-  const header = ["term", "meaning", "example", "status", "note", "addedAt"];
+  const header = ["term", "meaningKo", "meaning", "example", "status", "note", "addedAt"];
   const rows = entries.map((e) => header.map((h) => csvEscape(e[h])).join(","));
   return [header.join(","), ...rows].join("\n");
 }

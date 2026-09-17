@@ -171,9 +171,17 @@ main {
 
 .delete-btn:hover { color: #d93025; }
 
+.entry-meaning-ko {
+  margin: 8px 0 2px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--primary-dark);
+}
+
 .entry-meaning {
-  margin: 8px 0 4px;
-  font-size: 14px;
+  margin: 2px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .entry-example {
