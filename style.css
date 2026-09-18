@@ -36,6 +36,22 @@ body {
   font-size: 14px;
 }
 
+.load-error {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #d93025;
+}
+
+.load-error button {
+  border: none;
+  background: none;
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+}
+
 .tabs {
   display: flex;
   justify-content: center;

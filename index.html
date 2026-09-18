@@ -10,6 +10,10 @@
   <header class="app-header">
     <h1>TOEIC 준비</h1>
     <p class="subtitle">모르는 단어/숙어와 문법을 정리하고 이해도를 확인하세요</p>
+    <p class="load-error" id="load-error" style="display:none">
+      데이터를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤
+      <button id="load-retry">다시 시도</button>
+    </p>
   </header>
 
   <nav class="tabs">
@@ -110,7 +114,8 @@
     </section>
   </main>
 
-  <script src="grammar-data.js?v=8"></script>
-  <script src="script.js?v=8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="grammar-data.js?v=9"></script>
+  <script src="script.js?v=9"></script>
 </body>
 </html>

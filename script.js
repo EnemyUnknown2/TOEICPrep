@@ -4,24 +4,82 @@ const STATUS = {
   done: { label: "이해함", color: "var(--status-done)" },
 };
 
-const STORE_KEYS = { words: "toeic_words", grammar: "toeic_grammar" };
+// 기환스 사이트 방명록과 같은 Supabase 프로젝트를 재사용한다 (로그인 없이 공개 테이블).
+const SUPABASE_URL = "https://obmipvrmbxohcxhnpgmp.supabase.co";
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ibWlwdnJtYnhvaGN4aG5wZ21wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2MjQxNjcsImV4cCI6MjEwNTIwMDE2N30.tHAKwlSbgMH37_G81U5Q_gE29OL20nILPT8Aoea9lAI";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-function loadEntries(key) {
+const LEGACY_STORE_KEYS = { words: "toeic_words", grammar: "toeic_grammar" };
+const MIGRATION_DONE_KEY = "toeic_migrated_to_supabase";
+
+// DB(snake_case) <-> 화면에서 쓰는 JS 객체(camelCase) 변환
+function dbRowToEntry(row) {
+  return {
+    id: row.id,
+    term: row.term,
+    meaningKo: row.meaning_ko || "",
+    meaning: row.meaning || "",
+    example: row.example || "",
+    exampleKo: row.example_ko || "",
+    status: row.status || "none",
+    note: row.note || "",
+    addedAt: (row.created_at || "").slice(0, 10),
+  };
+}
+
+function entryToDbRow(kind, entry) {
+  return {
+    kind,
+    term: entry.term,
+    meaning_ko: entry.meaningKo || "",
+    meaning: entry.meaning || "",
+    example: entry.example || "",
+    example_ko: entry.exampleKo || "",
+    status: entry.status || "none",
+    note: entry.note || "",
+  };
+}
+
+const state = { words: [], grammar: [] };
+
+function loadLegacyLocalEntries(kind) {
   try {
-    return JSON.parse(localStorage.getItem(key)) || [];
+    return JSON.parse(localStorage.getItem(LEGACY_STORE_KEYS[kind])) || [];
   } catch {
     return [];
   }
 }
 
-function saveEntries(key, entries) {
-  localStorage.setItem(key, JSON.stringify(entries));
+// 이 브라우저에 예전 localStorage 데이터가 남아있으면(마이그레이션 전) Supabase로 한 번만 올린다.
+async function migrateLegacyDataIfNeeded() {
+  if (localStorage.getItem(MIGRATION_DONE_KEY)) return;
+
+  const legacyWords = loadLegacyLocalEntries("words");
+  const legacyGrammar = loadLegacyLocalEntries("grammar");
+  const rows = [
+    ...legacyWords.map((e) => entryToDbRow("words", e)),
+    ...legacyGrammar.map((e) => entryToDbRow("grammar", e)),
+  ];
+
+  if (rows.length > 0) {
+    const { error } = await sb.from("toeic_entries").insert(rows);
+    if (error) throw error;
+  }
+  localStorage.setItem(MIGRATION_DONE_KEY, "true");
 }
 
-const state = {
-  words: loadEntries(STORE_KEYS.words),
-  grammar: loadEntries(STORE_KEYS.grammar),
-};
+async function loadAllEntries() {
+  await migrateLegacyDataIfNeeded();
+  const { data, error } = await sb
+    .from("toeic_entries")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+
+  state.words = (data || []).filter((r) => r.kind === "words").map(dbRowToEntry);
+  state.grammar = (data || []).filter((r) => r.kind === "grammar").map(dbRowToEntry);
+}
 
 // ---------- 사전 API로 자동 정보 조회 ----------
 const API_TIMEOUT_MS = 5000;
@@ -166,10 +224,8 @@ async function fetchGrammarInfo(term) {
 
 // ---------- 항목 추가 ----------
 async function addEntry(kind, term) {
-  const entries = state[kind];
   const info = kind === "grammar" ? await fetchGrammarInfo(term) : await fetchDefinition(term);
-  entries.push({
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+  const draft = {
     term,
     meaningKo: info?.meaningKo || "",
     meaning: info?.meaning || "",
@@ -177,13 +233,26 @@ async function addEntry(kind, term) {
     exampleKo: info?.exampleKo || "",
     status: "none",
     note: "",
-    addedAt: new Date().toISOString().slice(0, 10),
-  });
-  saveEntries(STORE_KEYS[kind], entries);
+  };
+
+  const { data, error } = await sb
+    .from("toeic_entries")
+    .insert(entryToDbRow(kind, draft))
+    .select()
+    .single();
+
+  if (error) {
+    alert("저장에 실패했습니다: " + error.message);
+    return;
+  }
+
+  state[kind].push(dbRowToEntry(data));
   render(kind);
 }
 
 // ---------- 목록 렌더링 ----------
+let dataLoaded = false;
+
 function render(kind) {
   const listEl = document.getElementById(`${kind}-list`);
   if (!listEl) return;
@@ -191,7 +260,7 @@ function render(kind) {
   listEl.innerHTML = "";
 
   if (entries.length === 0) {
-    listEl.innerHTML = `<li class="empty-msg">아직 등록된 항목이 없습니다.</li>`;
+    listEl.innerHTML = `<li class="empty-msg">${dataLoaded ? "아직 등록된 항목이 없습니다." : "불러오는 중..."}</li>`;
     return;
   }
 
@@ -234,10 +303,12 @@ function render(kind) {
   });
 
   listEl.querySelectorAll(".delete-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state[kind] = state[kind].filter((e) => e.id !== btn.dataset.id);
-      saveEntries(STORE_KEYS[kind], state[kind]);
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      state[kind] = state[kind].filter((e) => e.id !== id);
       render(kind);
+      const { error } = await sb.from("toeic_entries").delete().eq("id", id);
+      if (error) alert("삭제에 실패했습니다: " + error.message);
     });
   });
 
@@ -269,12 +340,33 @@ function render(kind) {
   });
 }
 
+const PATCH_KEY_TO_DB = {
+  meaningKo: "meaning_ko",
+  meaning: "meaning",
+  example: "example",
+  exampleKo: "example_ko",
+  status: "status",
+  note: "note",
+};
+
 function updateEntry(kind, id, patch) {
   const entries = state[kind];
   const entry = entries.find((e) => e.id === id);
   if (!entry) return;
   Object.assign(entry, patch);
-  saveEntries(STORE_KEYS[kind], entries);
+
+  const dbPatch = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (PATCH_KEY_TO_DB[key]) dbPatch[PATCH_KEY_TO_DB[key]] = value;
+  }
+  // 화면은 로컬 상태로 바로 반영하고, 저장은 백그라운드에서 처리한다 (호출부를 async로 바꾸지 않아도 되도록).
+  sb
+    .from("toeic_entries")
+    .update(dbPatch)
+    .eq("id", id)
+    .then(({ error }) => {
+      if (error) alert("저장에 실패했습니다: " + error.message);
+    });
 }
 
 function escapeHtml(str) {
@@ -322,7 +414,6 @@ function parseCsv(text) {
     const cells = splitCsvLine(line);
     const obj = {};
     header.forEach((h, i) => (obj[h] = cells[i] || ""));
-    obj.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     if (!STATUS[obj.status]) obj.status = "none";
     return obj;
   });
@@ -375,10 +466,16 @@ function setupCsvButtons(kind) {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const imported = parseCsv(reader.result);
-      state[kind] = state[kind].concat(imported);
-      saveEntries(STORE_KEYS[kind], state[kind]);
+      if (imported.length === 0) return;
+      const rows = imported.map((e) => entryToDbRow(kind, e));
+      const { data, error } = await sb.from("toeic_entries").insert(rows).select();
+      if (error) {
+        alert("CSV 불러오기에 실패했습니다: " + error.message);
+        return;
+      }
+      state[kind] = state[kind].concat((data || []).map(dbRowToEntry));
       render(kind);
     };
     reader.readAsText(file, "utf-8");
@@ -528,6 +625,21 @@ function setupTest() {
   });
 }
 
+async function loadAndRender() {
+  const errorEl = document.getElementById("load-error");
+  try {
+    await loadAllEntries();
+    dataLoaded = true;
+    if (errorEl) errorEl.style.display = "none";
+  } catch (err) {
+    if (errorEl) errorEl.style.display = "block";
+    console.error(err);
+    return;
+  }
+  render("words");
+  render("grammar");
+}
+
 function init() {
   setupTabs();
   setupForm("words", "words-form", "words-input");
@@ -535,8 +647,10 @@ function init() {
   setupCsvButtons("words");
   setupCsvButtons("grammar");
   setupTest();
+  document.getElementById("load-retry")?.addEventListener("click", loadAndRender);
   render("words");
   render("grammar");
+  loadAndRender();
 }
 
 if (document.readyState === "loading") {
