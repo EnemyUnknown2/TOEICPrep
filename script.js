@@ -210,6 +210,7 @@ function render(kind) {
                 .map(([k, v]) => `<option value="${k}" ${entry.status === k ? "selected" : ""}>${v.label}</option>`)
                 .join("")}
             </select>
+            <button class="refetch-btn" data-id="${entry.id}" title="뜻 다시 검색">⟳</button>
             <button class="delete-btn" data-id="${entry.id}" title="삭제">✕</button>
           </div>
         </div>
@@ -237,6 +238,27 @@ function render(kind) {
       state[kind] = state[kind].filter((e) => e.id !== btn.dataset.id);
       saveEntries(STORE_KEYS[kind], state[kind]);
       render(kind);
+    });
+  });
+
+  listEl.querySelectorAll(".refetch-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const entry = state[kind].find((e) => e.id === btn.dataset.id);
+      if (!entry) return;
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "…";
+      try {
+        const info = kind === "grammar" ? await fetchGrammarInfo(entry.term) : await fetchDefinition(entry.term);
+        updateEntry(kind, entry.id, {
+          meaningKo: info?.meaningKo || "",
+          meaning: info?.meaning || "",
+          example: info?.example || "",
+          exampleKo: info?.exampleKo || "",
+        });
+      } finally {
+        render(kind);
+      }
     });
   });
 

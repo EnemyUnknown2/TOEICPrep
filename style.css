@@ -160,7 +160,8 @@ main {
   font-size: 12px;
 }
 
-.delete-btn {
+.delete-btn,
+.refetch-btn {
   border: none;
   background: none;
   color: var(--muted);
@@ -170,6 +171,8 @@ main {
 }
 
 .delete-btn:hover { color: #d93025; }
+.refetch-btn:hover { color: var(--primary); }
+.refetch-btn:disabled { opacity: 0.5; cursor: default; }
 
 .entry-meaning-ko {
   margin: 8px 0 2px;
