@@ -89,15 +89,19 @@ async function fetchKoreanMeaning(term) {
 }
 
 async function fetchDefinition(term) {
-  // 영어 정의(+품사)와, 우선 bare term 한국어 번역을 동시에 요청한다.
-  const [dict, bareKo] = await Promise.all([fetchEnglishDefinition(term), fetchKoreanMeaning(term)]);
+  // 품사를 알아낸 "다음에" 보정 번역을 요청하면 두 단계가 순차로 더해져 최악의 경우
+  // 대기 시간이 두 배(최대 10초)가 된다. 그래서 품사를 모르는 상태에서도 형용사/동사용
+  // 문형 번역을 미리 함께 요청해 두고, 나중에 필요한 것만 골라 쓴다 (전부 병렬 실행).
+  const [dict, bareKo, adjKo, verbKo] = await Promise.all([
+    fetchEnglishDefinition(term),
+    fetchKoreanMeaning(term),
+    fetchKoreanMeaning(buildTranslationQuery(term, "adjective")),
+    fetchKoreanMeaning(buildTranslationQuery(term, "verb")),
+  ]);
 
   let meaningKo = bareKo;
-  // 품사를 알면 형용사/동사에 맞는 문형으로 다시 물어봐서 더 정확한 번역을 시도한다.
-  if (dict?.partOfSpeech === "adjective" || dict?.partOfSpeech === "verb") {
-    const refined = await fetchKoreanMeaning(buildTranslationQuery(term, dict.partOfSpeech));
-    if (refined) meaningKo = refined;
-  }
+  if (dict?.partOfSpeech === "adjective" && adjKo) meaningKo = adjKo;
+  else if (dict?.partOfSpeech === "verb" && verbKo) meaningKo = verbKo;
 
   if (!dict && !meaningKo) return null;
   return {
