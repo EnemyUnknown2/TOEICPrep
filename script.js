@@ -37,24 +37,39 @@ async function fetchWithTimeout(url, ms) {
   }
 }
 
+const POS_LABELS = { n: "noun", v: "verb", adj: "adjective", adv: "adverb" };
+
+// Datamuse API: 무료, API 키 불필요, 정의와 품사 태그를 함께 제공 (dictionaryapi.dev보다 응답이 안정적)
 async function fetchEnglishDefinition(term) {
   try {
     const res = await fetchWithTimeout(
-      `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(term)}`,
+      `https://api.datamuse.com/words?sp=${encodeURIComponent(term)}&md=d&max=1`,
       API_TIMEOUT_MS
     );
     if (!res.ok) return null;
     const data = await res.json();
-    const meaning = data?.[0]?.meanings?.[0];
-    const def = meaning?.definitions?.[0];
-    if (!def) return null;
+    const defRaw = data?.[0]?.defs?.[0];
+    if (!defRaw) return null;
+    const tabIndex = defRaw.indexOf("\t");
+    const posCode = tabIndex === -1 ? "" : defRaw.slice(0, tabIndex);
+    const definition = (tabIndex === -1 ? defRaw : defRaw.slice(tabIndex + 1)).trim();
+    const posLabel = POS_LABELS[posCode] || posCode;
     return {
-      meaning: `(${meaning.partOfSpeech}) ${def.definition}`,
-      example: def.example || "",
+      partOfSpeech: posLabel,
+      meaning: posLabel ? `(${posLabel}) ${definition}` : definition,
+      example: "",
     };
   } catch {
     return null;
   }
+}
+
+// 품사에 맞는 짧은 문형으로 물어봐야 MyMemory가 올바른 품사로 번역해준다.
+// (예: "eligible" 단독 -> "자격"(명사), "to be eligible" -> "자격을 갖추다"(형용사 의미))
+function buildTranslationQuery(term, partOfSpeech) {
+  if (partOfSpeech === "adjective") return `to be ${term}`;
+  if (partOfSpeech === "verb") return `to ${term}`;
+  return term;
 }
 
 // MyMemory 번역 API로 한국어 뜻 조회 (무료, API 키 불필요)
@@ -74,7 +89,16 @@ async function fetchKoreanMeaning(term) {
 }
 
 async function fetchDefinition(term) {
-  const [dict, meaningKo] = await Promise.all([fetchEnglishDefinition(term), fetchKoreanMeaning(term)]);
+  // 영어 정의(+품사)와, 우선 bare term 한국어 번역을 동시에 요청한다.
+  const [dict, bareKo] = await Promise.all([fetchEnglishDefinition(term), fetchKoreanMeaning(term)]);
+
+  let meaningKo = bareKo;
+  // 품사를 알면 형용사/동사에 맞는 문형으로 다시 물어봐서 더 정확한 번역을 시도한다.
+  if (dict?.partOfSpeech === "adjective" || dict?.partOfSpeech === "verb") {
+    const refined = await fetchKoreanMeaning(buildTranslationQuery(term, dict.partOfSpeech));
+    if (refined) meaningKo = refined;
+  }
+
   if (!dict && !meaningKo) return null;
   return {
     meaningKo,
