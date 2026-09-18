@@ -275,3 +275,147 @@ main {
   border-radius: 50%;
   margin-right: 4px;
 }
+
+/* ---------- 자가 테스트 ---------- */
+.test-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.test-option-row {
+  display: flex;
+  gap: 20px;
+  font-size: 14px;
+}
+
+.test-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#test-start {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+#test-start:hover { background: var(--primary-dark); }
+
+.test-runner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+
+.test-progress {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.test-card {
+  width: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px 20px;
+  text-align: center;
+  min-height: 120px;
+}
+
+.test-card-term {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.test-card-answer {
+  margin-top: 16px;
+  text-align: left;
+}
+
+.test-card-answer .entry-meaning-ko,
+.test-card-answer .entry-meaning {
+  text-align: center;
+}
+
+.test-card-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#test-reveal {
+  padding: 10px 24px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  background: var(--card-bg);
+  color: var(--primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.test-rate-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.test-rate-btn {
+  flex: 1;
+  padding: 12px 8px;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.test-rate-none { background: var(--status-none); }
+.test-rate-learning { background: var(--status-learning); }
+.test-rate-done { background: var(--status-done); }
+
+.test-stop-btn {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.test-done {
+  text-align: center;
+  padding: 40px 0;
+}
+
+.test-done-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+#test-done-summary {
+  color: var(--muted);
+  margin: 0 0 20px;
+}
+
+#test-restart {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}

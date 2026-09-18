@@ -393,12 +393,119 @@ function setupForm(kind, formId, inputId) {
   });
 }
 
+// ---------- 자가 테스트 ----------
+const testState = { kind: null, queue: [], index: 0, results: {} };
+
+function buildTestQueue(kind, onlyUnfinished) {
+  let entries = state[kind].slice();
+  if (onlyUnfinished) entries = entries.filter((e) => e.status !== "done");
+  for (let i = entries.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [entries[i], entries[j]] = [entries[j], entries[i]];
+  }
+  return entries;
+}
+
+function startTest() {
+  const kind = document.querySelector('input[name="test-kind"]:checked')?.value || "words";
+  const onlyUnfinished = document.getElementById("test-only-unfinished")?.checked ?? true;
+  const queue = buildTestQueue(kind, onlyUnfinished);
+  const emptyMsg = document.getElementById("test-empty-msg");
+
+  if (queue.length === 0) {
+    if (emptyMsg) emptyMsg.style.display = "block";
+    return;
+  }
+  if (emptyMsg) emptyMsg.style.display = "none";
+
+  testState.kind = kind;
+  testState.queue = queue;
+  testState.index = 0;
+  testState.results = { done: 0, learning: 0, none: 0 };
+
+  document.getElementById("test-setup").style.display = "none";
+  document.getElementById("test-done").style.display = "none";
+  document.getElementById("test-runner").style.display = "block";
+  renderTestCard();
+}
+
+function renderTestCard() {
+  const entry = testState.queue[testState.index];
+  document.getElementById("test-progress").textContent = `${testState.index + 1} / ${testState.queue.length}`;
+  document.getElementById("test-card-term").textContent = entry.term;
+
+  const answerEl = document.getElementById("test-card-answer");
+  answerEl.style.display = "none";
+  answerEl.innerHTML = `
+    ${entry.meaningKo ? `<p class="entry-meaning-ko">${escapeHtml(entry.meaningKo)}</p>` : ""}
+    ${entry.meaning ? `<p class="entry-meaning">${escapeHtml(entry.meaning)}</p>` : ""}
+    ${!entry.meaningKo && !entry.meaning ? `<p class="entry-meaning" style="color:var(--muted)">등록된 뜻이 없습니다.</p>` : ""}
+    ${entry.example ? `
+    <div class="entry-example-block">
+      <p class="entry-example">${escapeHtml(entry.example)}</p>
+      ${entry.exampleKo ? `<p class="entry-example-ko">${escapeHtml(entry.exampleKo)}</p>` : ""}
+    </div>` : ""}
+    ${entry.note ? `<p class="test-card-note">메모: ${escapeHtml(entry.note)}</p>` : ""}
+  `;
+
+  document.getElementById("test-reveal").style.display = "inline-block";
+  document.getElementById("test-rate-row").style.display = "none";
+}
+
+function revealTestAnswer() {
+  document.getElementById("test-card-answer").style.display = "block";
+  document.getElementById("test-reveal").style.display = "none";
+  document.getElementById("test-rate-row").style.display = "flex";
+}
+
+function rateTestCard(status) {
+  const entry = testState.queue[testState.index];
+  updateEntry(testState.kind, entry.id, { status });
+  testState.results[status] = (testState.results[status] || 0) + 1;
+
+  testState.index++;
+  if (testState.index >= testState.queue.length) {
+    finishTest();
+  } else {
+    renderTestCard();
+  }
+}
+
+function finishTest() {
+  document.getElementById("test-runner").style.display = "none";
+  document.getElementById("test-done").style.display = "block";
+  const r = testState.results;
+  document.getElementById("test-done-summary").textContent =
+    `이해함 ${r.done || 0} · 학습중 ${r.learning || 0} · 미숙지 ${r.none || 0}`;
+  render(testState.kind);
+}
+
+function stopTest() {
+  document.getElementById("test-runner").style.display = "none";
+  document.getElementById("test-setup").style.display = "block";
+  render(testState.kind);
+}
+
+function setupTest() {
+  document.getElementById("test-start")?.addEventListener("click", startTest);
+  document.getElementById("test-reveal")?.addEventListener("click", revealTestAnswer);
+  document.getElementById("test-stop")?.addEventListener("click", stopTest);
+  document.getElementById("test-restart")?.addEventListener("click", () => {
+    document.getElementById("test-done").style.display = "none";
+    document.getElementById("test-setup").style.display = "block";
+  });
+  document.querySelectorAll(".test-rate-btn").forEach((btn) => {
+    btn.addEventListener("click", () => rateTestCard(btn.dataset.status));
+  });
+}
+
 function init() {
   setupTabs();
   setupForm("words", "words-form", "words-input");
   setupForm("grammar", "grammar-form", "grammar-input");
   setupCsvButtons("words");
   setupCsvButtons("grammar");
+  setupTest();
   render("words");
   render("grammar");
 }
