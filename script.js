@@ -73,8 +73,12 @@ function buildTranslationQuery(term, partOfSpeech) {
 }
 
 // MyMemory 번역 API로 한국어 뜻 조회 (무료, API 키 불필요).
-// matches에는 실제 번역 메모리(사람이 번역한 문장 쌍)가 들어있는데, id:0/"MT!"로 표시된
-// 항목은 그냥 기계번역 자체라 제외하고, 품질 좋은 문장 쌍이 있으면 예문으로 함께 가져온다.
+//
+// responseData.translatedText는 MyMemory가 크라우드소싱 번역 메모리 중 "가장 유사한 문장"을
+// 골라 반환하는데, 특히 짧은 단어는 우연히 글자 수만 비슷한 완전히 무관한 문장이 최고 매치로
+// 뽑히는 경우가 있다 (예: "among" -> 전혀 다른 뜻의 등록된 문장). id:0/"MT!"로 표시된 항목은
+// 매번 그 자리에서 새로 계산되는 순수 기계번역이라 이런 오염이 없으므로 이쪽을 뜻으로 우선
+// 사용하고, 실제 번역 메모리(사람이 번역한 문장 쌍) 중 품질 좋은 것은 예문으로만 활용한다.
 async function fetchKoreanMeaning(term) {
   try {
     const res = await fetchWithTimeout(
@@ -84,9 +88,12 @@ async function fetchKoreanMeaning(term) {
     if (!res.ok) return { text: "", example: "", exampleKo: "" };
     const data = await res.json();
     if (data?.responseStatus !== 200) return { text: "", example: "", exampleKo: "" };
-    const text = (data?.responseData?.translatedText || "").trim();
 
-    const goodMatch = (data?.matches || []).find((m) => {
+    const matches = data?.matches || [];
+    const mtEntry = matches.find((m) => m.id === 0 || m["created-by"] === "MT!");
+    const text = (mtEntry?.translation || data?.responseData?.translatedText || "").trim();
+
+    const goodMatch = matches.find((m) => {
       const quality = Number(m.quality) || 0;
       const isRealTM = m.id !== 0 && m["created-by"] !== "MT!";
       const looksLikeSentence = (m.segment || "").trim().length > term.length + 3;
