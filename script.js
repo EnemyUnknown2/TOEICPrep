@@ -72,19 +72,34 @@ function buildTranslationQuery(term, partOfSpeech) {
   return term;
 }
 
-// MyMemory 번역 API로 한국어 뜻 조회 (무료, API 키 불필요)
+// MyMemory 번역 API로 한국어 뜻 조회 (무료, API 키 불필요).
+// matches에는 실제 번역 메모리(사람이 번역한 문장 쌍)가 들어있는데, id:0/"MT!"로 표시된
+// 항목은 그냥 기계번역 자체라 제외하고, 품질 좋은 문장 쌍이 있으면 예문으로 함께 가져온다.
 async function fetchKoreanMeaning(term) {
   try {
     const res = await fetchWithTimeout(
       `https://api.mymemory.translated.net/get?q=${encodeURIComponent(term)}&langpair=en|ko`,
       API_TIMEOUT_MS
     );
-    if (!res.ok) return "";
+    if (!res.ok) return { text: "", example: "", exampleKo: "" };
     const data = await res.json();
-    if (data?.responseStatus !== 200) return "";
-    return (data?.responseData?.translatedText || "").trim();
+    if (data?.responseStatus !== 200) return { text: "", example: "", exampleKo: "" };
+    const text = (data?.responseData?.translatedText || "").trim();
+
+    const goodMatch = (data?.matches || []).find((m) => {
+      const quality = Number(m.quality) || 0;
+      const isRealTM = m.id !== 0 && m["created-by"] !== "MT!";
+      const looksLikeSentence = (m.segment || "").trim().length > term.length + 3;
+      return isRealTM && quality >= 60 && looksLikeSentence && m.segment && m.translation;
+    });
+
+    return {
+      text,
+      example: goodMatch?.segment?.trim() || "",
+      exampleKo: goodMatch?.translation?.trim() || "",
+    };
   } catch {
-    return "";
+    return { text: "", example: "", exampleKo: "" };
   }
 }
 
@@ -99,15 +114,16 @@ async function fetchDefinition(term) {
     fetchKoreanMeaning(buildTranslationQuery(term, "verb")),
   ]);
 
-  let meaningKo = bareKo;
-  if (dict?.partOfSpeech === "adjective" && adjKo) meaningKo = adjKo;
-  else if (dict?.partOfSpeech === "verb" && verbKo) meaningKo = verbKo;
+  let picked = bareKo;
+  if (dict?.partOfSpeech === "adjective" && adjKo.text) picked = adjKo;
+  else if (dict?.partOfSpeech === "verb" && verbKo.text) picked = verbKo;
 
-  if (!dict && !meaningKo) return null;
+  if (!dict && !picked.text) return null;
   return {
-    meaningKo,
+    meaningKo: picked.text,
     meaning: dict?.meaning || "",
-    example: dict?.example || "",
+    example: picked.example || "",
+    exampleKo: picked.exampleKo || "",
   };
 }
 
@@ -151,6 +167,7 @@ async function addEntry(kind, term) {
     meaningKo: info?.meaningKo || "",
     meaning: info?.meaning || "",
     example: info?.example || "",
+    exampleKo: info?.exampleKo || "",
     status: "none",
     note: "",
     addedAt: new Date().toISOString().slice(0, 10),
@@ -192,7 +209,11 @@ function render(kind) {
         ${entry.meaningKo ? `<p class="entry-meaning-ko">${escapeHtml(entry.meaningKo)}</p>` : ""}
         ${entry.meaning ? `<p class="entry-meaning">${escapeHtml(entry.meaning)}</p>` : ""}
         ${!entry.meaningKo && !entry.meaning ? `<p class="entry-meaning" style="color:var(--muted)">뜻을 찾지 못했습니다. 메모에 직접 입력해 주세요.</p>` : ""}
-        ${entry.example ? `<p class="entry-example">${escapeHtml(entry.example)}</p>` : ""}
+        ${entry.example ? `
+        <div class="entry-example-block">
+          <p class="entry-example">${escapeHtml(entry.example)}</p>
+          ${entry.exampleKo ? `<p class="entry-example-ko">${escapeHtml(entry.exampleKo)}</p>` : ""}
+        </div>` : ""}
         <textarea class="entry-note" placeholder="메모 (이해 안 되는 부분 등)" data-id="${entry.id}">${escapeHtml(entry.note)}</textarea>
       `;
       listEl.appendChild(li);
@@ -255,7 +276,7 @@ function renderDashboard() {
 
 // ---------- CSV 내보내기 / 불러오기 ----------
 function toCsv(entries) {
-  const header = ["term", "meaningKo", "meaning", "example", "status", "note", "addedAt"];
+  const header = ["term", "meaningKo", "meaning", "example", "exampleKo", "status", "note", "addedAt"];
   const rows = entries.map((e) => header.map((h) => csvEscape(e[h])).join(","));
   return [header.join(","), ...rows].join("\n");
 }
