@@ -24,9 +24,25 @@ const state = {
 };
 
 // ---------- 사전 API로 자동 정보 조회 ----------
+const API_TIMEOUT_MS = 5000;
+
+// API가 응답이 없을 때 무한 대기하지 않도록 시간 제한을 둔다.
+async function fetchWithTimeout(url, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchEnglishDefinition(term) {
   try {
-    const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(term)}`);
+    const res = await fetchWithTimeout(
+      `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(term)}`,
+      API_TIMEOUT_MS
+    );
     if (!res.ok) return null;
     const data = await res.json();
     const meaning = data?.[0]?.meanings?.[0];
@@ -44,7 +60,10 @@ async function fetchEnglishDefinition(term) {
 // MyMemory 번역 API로 한국어 뜻 조회 (무료, API 키 불필요)
 async function fetchKoreanMeaning(term) {
   try {
-    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(term)}&langpair=en|ko`);
+    const res = await fetchWithTimeout(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(term)}&langpair=en|ko`,
+      API_TIMEOUT_MS
+    );
     if (!res.ok) return "";
     const data = await res.json();
     if (data?.responseStatus !== 200) return "";
@@ -302,13 +321,26 @@ function setupTabs() {
 }
 
 function setupForm(kind, formId, inputId) {
-  document.getElementById(formId)?.addEventListener("submit", async (e) => {
+  const form = document.getElementById(formId);
+  form?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const input = document.getElementById(inputId);
     const term = input.value.trim();
     if (!term) return;
+    const submitBtn = form.querySelector("button[type='submit']");
+    const originalLabel = submitBtn.textContent;
     input.value = "";
-    await addEntry(kind, term);
+    input.disabled = true;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "검색 중...";
+    try {
+      await addEntry(kind, term);
+    } finally {
+      input.disabled = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalLabel;
+      input.focus();
+    }
   });
 }
 
