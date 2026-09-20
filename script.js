@@ -227,22 +227,21 @@ async function fetchDefinition(term) {
   // 보고 원래 단어(bare) 번역으로 대체한다.
   const isUsableVerbKo = verbKo.text && verbKo.text.endsWith("다");
 
-  // "complimentary"처럼 뜻이 여러 개인 단어는 "to be complimentary"라고 물으면 번역기가 bare
-  // 번역("공짜의")과 전혀 다른 엉뚱한 뜻("칭찬받다")으로 넘어가버릴 수 있다. 품사만 바뀌고 같은
-  // 뜻이면 번역문에 원래 bare 번역이 어근으로 남아있기 마련이니(예: 자격 -> 자격을 갖추다),
-  // 서로 겹치는 부분이 전혀 없으면 다른 뜻으로 새버린 것으로 보고 bare 번역을 대신 쓴다.
-  const sharesRoot = (a, b) => !a || !b || a.includes(b) || b.includes(a);
-
+  // "complimentary"(무료의/칭찬하는 두 뜻)처럼 같은 품사 안에 서로 다른 뜻이 있으면 "to be X"
+  // 문형이 엉뚱한 쪽으로 넘어갈 수 있다. 하지만 Datamuse의 같은 품사 정의 개수는 이런 진짜
+  // 동음이의어와, "competent"처럼 뜻은 하나인데 분야별 기술적 정의만 여러 개인 경우를 구분하지
+  // 못해서(둘 다 여러 개로 잡힘) 믿을 만한 신호가 아니었다 — 시도했다가 되돌렸다. 이런 드문
+  // 동음이의어 오역은 알려진 한계로 남겨두고, ⟳ 버튼이나 메모로 직접 고치는 편이 더 안전하다.
   const koForPos = (pos) => {
     if (dict?.isAmbiguousProperNoun) return bareKo.text;
-    if (pos === "adjective" && adjKo.text && sharesRoot(bareKo.text, adjKo.text)) return adjKo.text;
-    if (pos === "verb" && isUsableVerbKo && sharesRoot(bareKo.text, verbKo.text)) return verbKo.text;
+    if (pos === "adjective" && adjKo.text) return adjKo.text;
+    if (pos === "verb" && isUsableVerbKo) return verbKo.text;
     return bareKo.text;
   };
 
   const primaryKo = dict?.isAmbiguousProperNoun ? bareKo
-    : dict?.partOfSpeech === "adjective" && adjKo.text && sharesRoot(bareKo.text, adjKo.text) ? adjKo
-    : dict?.partOfSpeech === "verb" && isUsableVerbKo && sharesRoot(bareKo.text, verbKo.text) ? verbKo
+    : dict?.partOfSpeech === "adjective" && adjKo.text ? adjKo
+    : dict?.partOfSpeech === "verb" && isUsableVerbKo ? verbKo
     : bareKo;
   const picked = {
     text: koForPos(dict?.partOfSpeech),
