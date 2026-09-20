@@ -117,6 +117,12 @@ function hasProperNounSense(defs) {
 
 // 단어 하나에 품사가 여러 개 있으면(예: garner=동사/명사) TOEIC 수준에 맞게 최대 2개까지만
 // 서로 다른 품사의 뜻을 뽑는다. 사람 이름/지명 뜻(surname 등)은 TOEIC 단어장에 필요 없으니 제외.
+//
+// 품사가 같은 정의가 여러 개라고 자동으로 나눠 보여주는 건 시도했다가 되돌렸다: Datamuse는
+// "complimentary"(무료의/칭찬하는, 진짜 다른 뜻)와 "competent"·"negotiate"(뜻은 하나인데
+// (transitive)/(intransitive)나 분야별 기술적 정의만 여러 개인 경우)를 구분해 주지 않아서,
+// 후자까지 전부 장황하게 나뉘어버렸다. 진짜 다의어는 multi-meaning-data.js에 직접 정리해서
+// 정확하게 처리한다.
 const MAX_SENSES = 2;
 
 function extractSenses(defs) {
@@ -211,6 +217,25 @@ async function fetchKoreanMeaning(term) {
 }
 
 async function fetchDefinition(term) {
+  // "manage to"처럼 API들이 잘 처리 못하는 구동사/숙어는 내장 데이터셋에서 먼저 찾는다.
+  const idiom = findLocalIdiom(term);
+  if (idiom) {
+    return { meaningKo: idiom.ko, meaning: idiom.en ? `(idiom) ${idiom.en}` : "", example: idiom.example || "", exampleKo: idiom.exampleKo || "" };
+  }
+
+  // "complimentary"처럼 진짜 뜻이 여러 개인 단어도 직접 정리한 데이터셋에서 먼저 찾는다.
+  const multi = findLocalMultiMeaning(term);
+  if (multi) {
+    const first = multi.meanings[0];
+    return {
+      meaningKo: first.ko,
+      meaning: `(${first.pos}) ${first.en}`,
+      meanings: multi.meanings,
+      example: "",
+      exampleKo: "",
+    };
+  }
+
   // 품사를 알아낸 "다음에" 보정 번역을 요청하면 두 단계가 순차로 더해져 최악의 경우
   // 대기 시간이 두 배(최대 10초)가 된다. 그래서 품사를 모르는 상태에서도 형용사/동사용
   // 문형 번역을 미리 함께 요청해 두고, 나중에 필요한 것만 골라 쓴다 (전부 병렬 실행).
@@ -274,34 +299,54 @@ async function fetchDefinition(term) {
   };
 }
 
-// ---------- 문법: 내장 TOEIC 문법 데이터셋에서 검색 ----------
-function normalizeGrammarTerm(str) {
+// ---------- 내장 데이터셋(문법/숙어)에서 키워드로 검색하는 공통 로직 ----------
+function normalizeMatchText(str) {
   return str.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function findLocalGrammar(term) {
-  const target = normalizeGrammarTerm(term);
-  if (!target) return null;
+// bidirectional: true면 (문법처럼) 서로 포함하기만 해도 매칭. false면 (숙어처럼) target이
+// keyword 전체를 포함할 때만 매칭 — "eligible"이 "be eligible for" 안에 들어있다고 해서
+// 거꾸로 "be eligible for" 숙어에 잘못 걸리는 걸 막는다.
+function findInKeywordDataset(term, dataset, bidirectional = true) {
+  const target = normalizeMatchText(term);
+  if (!target || !dataset) return null;
 
-  for (const entry of TOEIC_GRAMMAR) {
-    if (entry.keywords.some((k) => normalizeGrammarTerm(k) === target)) return entry;
+  for (const entry of dataset) {
+    if (entry.keywords.some((k) => normalizeMatchText(k) === target)) return entry;
   }
-  for (const entry of TOEIC_GRAMMAR) {
+  for (const entry of dataset) {
     if (entry.keywords.some((k) => {
-      const nk = normalizeGrammarTerm(k);
-      return nk.includes(target) || target.includes(nk);
+      const nk = normalizeMatchText(k);
+      return bidirectional ? nk.includes(target) || target.includes(nk) : target.includes(nk);
     })) return entry;
   }
   return null;
 }
 
+function findLocalGrammar(term) {
+  return findInKeywordDataset(term, typeof TOEIC_GRAMMAR !== "undefined" ? TOEIC_GRAMMAR : null);
+}
+
 async function fetchGrammarInfo(term) {
-  const local = typeof TOEIC_GRAMMAR !== "undefined" ? findLocalGrammar(term) : null;
+  const local = findLocalGrammar(term);
   if (local) {
     return { meaningKo: local.explanation, meaning: "", example: local.example || "" };
   }
   // 데이터셋에 없으면 영어 단일 용어(gerund 등)로 간주하고 사전 API로 보조 검색
   return await fetchDefinition(term);
+}
+
+// ---------- 숙어: 내장 TOEIC 구동사/숙어 데이터셋에서 검색 ----------
+// (Datamuse에 정의가 없거나, 번역 API가 단어 그대로 직역해서 실패하는 경우가 많아 별도로 관리)
+function findLocalIdiom(term) {
+  return findInKeywordDataset(term, typeof TOEIC_IDIOMS !== "undefined" ? TOEIC_IDIOMS : null, false);
+}
+
+// ---------- 진짜 다의어: 직접 정리한 데이터셋에서 정확히 일치할 때만 검색 ----------
+function findLocalMultiMeaning(term) {
+  if (typeof TOEIC_MULTI_MEANINGS === "undefined") return null;
+  const target = normalizeMatchText(term);
+  return TOEIC_MULTI_MEANINGS.find((entry) => normalizeMatchText(entry.term) === target) || null;
 }
 
 // ---------- 항목 추가 ----------
