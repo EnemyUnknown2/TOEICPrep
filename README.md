@@ -12,7 +12,7 @@ TOEIC 시험 대비용 단어/숙어 정리 및 이해도 진행 상황 확인 �
 ## 기능
 
 - **단어 및 숙어** 등록, 추가 시 자동으로 뜻을 검색해 저장 (찾지 못하면 직접 메모에 입력)
-  - 영어 정의 + 품사: [Datamuse API](https://www.datamuse.com/api/)
+  - 영어 정의 + 품사 + 발음기호: [Datamuse API](https://www.datamuse.com/api/) — 발음은 CMU 발음 사전 표기(ARPAbet)로 오는데, 이를 사전에서 흔히 보는 IPA 발음기호(예: `/ˈɛlʌdʒʌbʌl/`)로 변환해서 보여줍니다. 음절 경계까지는 알 수 없어 강세 기호만 정확합니다.
   - 한국어 뜻: [MyMemory Translation API](https://mymemory.translated.net/) — 품사를 알면 ("to be eligible", "to negotiate"처럼) 품사에 맞는 짧은 문형으로 다시 물어봐서 더 정확한 번역을 시도합니다. (예: "eligible" 단독 번역은 명사형 "자격"이 나오지만, 품사를 반영하면 "자격을 갖추다"로 정확해짐)
   - **번역 결과 검증**: 번역 결과에 한글이 하나도 없으면(예: "lax" -> "LAX", 로스앤젤레스 공항 코드와 헷갈림) 번역이 아니라 이름/코드를 그대로 돌려준 것으로 보고 버립니다. 이 경우 한국어 뜻 없이 영어 정의만 표시되며, 메모에 직접 입력하시면 됩니다.
   - **여러 뜻 (품사가 다른 경우)**: 단어에 서로 다른 품사의 뜻이 여러 개 있으면(예: eligible = 형용사/명사, garner = 동사/명사) TOEIC 수준에서 헷갈리지 않게 최대 2개까지 품사 배지와 함께 나란히 보여줍니다. 사람 이름/지명 뜻이 섞여 있거나 번역이 실패해 다른 뜻과 겹치는 경우는 제외합니다.
@@ -35,7 +35,8 @@ TOEIC 시험 대비용 단어/숙어 정리 및 이해도 진행 상황 확인 �
 
 1. Supabase 대시보드 > SQL Editor에서 [supabase/schema.sql](supabase/schema.sql)을 실행해 `toeic_entries` 테이블과 RLS 정책을 만듭니다.
 2. 이어서 [supabase/migration_002_multi_meaning.sql](supabase/migration_002_multi_meaning.sql)을 실행해 여러 뜻 저장용 `meanings` 컬럼을 추가합니다.
-3. `script.js`의 `SUPABASE_URL` / `SUPABASE_ANON_KEY`를 프로젝트에 맞게 수정합니다.
+3. 이어서 [supabase/migration_003_phonetic.sql](supabase/migration_003_phonetic.sql)을 실행해 발음기호 저장용 `phonetic` 컬럼을 추가합니다.
+4. `script.js`의 `SUPABASE_URL` / `SUPABASE_ANON_KEY`를 프로젝트에 맞게 수정합니다.
 
 **로그인 없이 공개 테이블**이라, URL과 anon key를 아는 사람은 누구나 데이터를 읽고 쓸 수 있습니다 (방명록과 동일한 트레이드오프이며, 의도적으로 선택한 방식입니다). 개인정보 보호가 중요해지면 Supabase Auth로 로그인을 추가하고 RLS를 `auth.uid()` 기준으로 좁히는 방향으로 전환할 수 있습니다.
 
