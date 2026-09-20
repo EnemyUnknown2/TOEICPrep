@@ -143,6 +143,10 @@ async function fetchEnglishDefinition(term) {
     );
     if (!res.ok) return null;
     const data = await res.json();
+    // sp=는 철자 유사어 검색이라, 사전에 없는 단어(오타 등)를 입력하면 완전히 다른 단어로
+    // 조용히 바꿔서 정의를 준다 (예: "diabet" -> "diabat"의 물리학 용어 정의). 요청한 단어와
+    // 다르면 그 정의는 쓰지 않는다 (한국어 번역은 MyMemory가 별도로 시도하므로 영향 없음).
+    if ((data?.[0]?.word || "").toLowerCase() !== term.toLowerCase().trim()) return null;
     const defs = data?.[0]?.defs;
     if (!defs || defs.length === 0) return null;
     const senses = extractSenses(defs);
@@ -223,16 +227,22 @@ async function fetchDefinition(term) {
   // 보고 원래 단어(bare) 번역으로 대체한다.
   const isUsableVerbKo = verbKo.text && verbKo.text.endsWith("다");
 
+  // "complimentary"처럼 뜻이 여러 개인 단어는 "to be complimentary"라고 물으면 번역기가 bare
+  // 번역("공짜의")과 전혀 다른 엉뚱한 뜻("칭찬받다")으로 넘어가버릴 수 있다. 품사만 바뀌고 같은
+  // 뜻이면 번역문에 원래 bare 번역이 어근으로 남아있기 마련이니(예: 자격 -> 자격을 갖추다),
+  // 서로 겹치는 부분이 전혀 없으면 다른 뜻으로 새버린 것으로 보고 bare 번역을 대신 쓴다.
+  const sharesRoot = (a, b) => !a || !b || a.includes(b) || b.includes(a);
+
   const koForPos = (pos) => {
     if (dict?.isAmbiguousProperNoun) return bareKo.text;
-    if (pos === "adjective" && adjKo.text) return adjKo.text;
-    if (pos === "verb" && isUsableVerbKo) return verbKo.text;
+    if (pos === "adjective" && adjKo.text && sharesRoot(bareKo.text, adjKo.text)) return adjKo.text;
+    if (pos === "verb" && isUsableVerbKo && sharesRoot(bareKo.text, verbKo.text)) return verbKo.text;
     return bareKo.text;
   };
 
   const primaryKo = dict?.isAmbiguousProperNoun ? bareKo
-    : dict?.partOfSpeech === "adjective" && adjKo.text ? adjKo
-    : dict?.partOfSpeech === "verb" && isUsableVerbKo ? verbKo
+    : dict?.partOfSpeech === "adjective" && adjKo.text && sharesRoot(bareKo.text, adjKo.text) ? adjKo
+    : dict?.partOfSpeech === "verb" && isUsableVerbKo && sharesRoot(bareKo.text, verbKo.text) ? verbKo
     : bareKo;
   const picked = {
     text: koForPos(dict?.partOfSpeech),
