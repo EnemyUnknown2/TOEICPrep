@@ -158,9 +158,21 @@ main {
   gap: 8px;
 }
 
+.entry-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .entry-term {
   font-weight: 600;
   font-size: 16px;
+}
+
+.entry-phonetic {
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .entry-meta {

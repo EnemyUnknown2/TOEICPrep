@@ -18,6 +18,7 @@ function dbRowToEntry(row) {
   return {
     id: row.id,
     term: row.term,
+    phonetic: row.phonetic || "",
     meaningKo: row.meaning_ko || "",
     meaning: row.meaning || "",
     meanings: Array.isArray(row.meanings) ? row.meanings : [],
@@ -33,6 +34,7 @@ function entryToDbRow(entry) {
   return {
     kind: "words",
     term: entry.term,
+    phonetic: entry.phonetic || "",
     meaning_ko: entry.meaningKo || "",
     meaning: entry.meaning || "",
     meanings: entry.meanings || [],
@@ -134,11 +136,61 @@ function extractSenses(defs) {
   return senses;
 }
 
-// Datamuse API: 무료, API 키 불필요, 정의와 품사 태그를 함께 제공 (dictionaryapi.dev보다 응답이 안정적)
+// CMU 발음 사전 표기(ARPAbet, 예: "EH1 L AH0 JH AH0 B AH0 L")를 사전에서 흔히 보는
+// IPA 발음기호로 변환한다. 음절 경계까지는 알 수 없어 강세 기호(ˈ/ˌ)만 해당 모음 앞에 붙인다.
+const ARPABET_TO_IPA = {
+  AA: "ɑ", AE: "æ", AH: "ʌ", AO: "ɔ", AW: "aʊ", AY: "aɪ",
+  EH: "ɛ", ER: "ɝ", EY: "eɪ", IH: "ɪ", IY: "i", OW: "oʊ",
+  OY: "ɔɪ", UH: "ʊ", UW: "u",
+  B: "b", CH: "tʃ", D: "d", DH: "ð", F: "f", G: "ɡ", HH: "h",
+  JH: "dʒ", K: "k", L: "l", M: "m", N: "n", NG: "ŋ", P: "p",
+  R: "r", S: "s", SH: "ʃ", T: "t", TH: "θ", V: "v", W: "w",
+  Y: "j", Z: "z", ZH: "ʒ",
+};
+
+function arpabetToIpa(pron) {
+  const ipa = pron
+    .trim()
+    .split(/\s+/)
+    .map((tok) => {
+      const m = tok.match(/^([A-Z]+)([0-2])?$/);
+      if (!m) return "";
+      const [, phoneme, stress] = m;
+      const sym = ARPABET_TO_IPA[phoneme] || "";
+      if (stress === "1") return "ˈ" + sym;
+      if (stress === "2") return "ˌ" + sym;
+      return sym;
+    })
+    .join("");
+  return ipa ? `/${ipa}/` : "";
+}
+
+function extractPhonetic(tags) {
+  const tag = (tags || []).find((t) => t.startsWith("pron:"));
+  return tag ? arpabetToIpa(tag.slice(5)) : "";
+}
+
+// 발음기호만 필요할 때(숙어/다의어 데이터셋에서 이미 뜻을 찾은 경우) 쓰는 가벼운 조회.
+async function fetchPhonetic(term) {
+  try {
+    const res = await fetchWithTimeout(
+      `https://api.datamuse.com/words?sp=${encodeURIComponent(term)}&md=r&max=1`,
+      API_TIMEOUT_MS
+    );
+    if (!res.ok) return "";
+    const data = await res.json();
+    if ((data?.[0]?.word || "").toLowerCase() !== term.toLowerCase().trim()) return "";
+    return extractPhonetic(data?.[0]?.tags);
+  } catch {
+    return "";
+  }
+}
+
+// Datamuse API: 무료, API 키 불필요, 정의·품사·발음 태그를 함께 제공 (dictionaryapi.dev보다 응답이 안정적)
 async function fetchEnglishDefinition(term) {
   try {
     const res = await fetchWithTimeout(
-      `https://api.datamuse.com/words?sp=${encodeURIComponent(term)}&md=d&max=1`,
+      `https://api.datamuse.com/words?sp=${encodeURIComponent(term)}&md=dr&max=1`,
       API_TIMEOUT_MS
     );
     if (!res.ok) return null;
@@ -148,14 +200,16 @@ async function fetchEnglishDefinition(term) {
     // 다르면 그 정의는 쓰지 않는다 (한국어 번역은 MyMemory가 별도로 시도하므로 영향 없음).
     if ((data?.[0]?.word || "").toLowerCase() !== term.toLowerCase().trim()) return null;
     const defs = data?.[0]?.defs;
-    if (!defs || defs.length === 0) return null;
+    const phonetic = extractPhonetic(data?.[0]?.tags);
+    if (!defs || defs.length === 0) return phonetic ? { phonetic } : null;
     const senses = extractSenses(defs);
     const first = senses[0];
-    if (!first) return null;
+    if (!first) return phonetic ? { phonetic } : null;
     return {
       partOfSpeech: first.pos,
       isAmbiguousProperNoun: hasProperNounSense(defs),
       senses,
+      phonetic,
       meaning: `(${first.pos}) ${first.en}`,
       example: "",
     };
@@ -257,7 +311,13 @@ async function fetchDefinition(term) {
   // "manage to"처럼 API들이 잘 처리 못하는 구동사/숙어는 내장 데이터셋에서 먼저 찾는다.
   const idiom = findLocalIdiom(term);
   if (idiom) {
-    return { meaningKo: idiom.ko, meaning: idiom.en ? `(idiom) ${idiom.en}` : "", example: idiom.example || "", exampleKo: idiom.exampleKo || "" };
+    return {
+      meaningKo: idiom.ko,
+      meaning: idiom.en ? `(idiom) ${idiom.en}` : "",
+      phonetic: await fetchPhonetic(term),
+      example: idiom.example || "",
+      exampleKo: idiom.exampleKo || "",
+    };
   }
 
   // "complimentary"처럼 진짜 뜻이 여러 개인 단어도 직접 정리한 데이터셋에서 먼저 찾는다.
@@ -268,6 +328,7 @@ async function fetchDefinition(term) {
       meaningKo: first.ko,
       meaning: `(${first.pos}) ${first.en}`,
       meanings: multi.meanings,
+      phonetic: await fetchPhonetic(term),
       example: "",
       exampleKo: "",
     };
@@ -326,6 +387,7 @@ async function fetchDefinition(term) {
     meaningKo: picked.text,
     meaning: dict?.meaning || "",
     meanings,
+    phonetic: dict?.phonetic || "",
     example: picked.example || "",
     exampleKo: picked.exampleKo || "",
   };
@@ -336,6 +398,7 @@ async function addEntry(term) {
   const info = await fetchDefinition(term);
   const draft = {
     term,
+    phonetic: info?.phonetic || "",
     meaningKo: info?.meaningKo || "",
     meaning: info?.meaning || "",
     meanings: info?.meanings || [],
@@ -382,7 +445,10 @@ function render() {
       li.className = "entry-card";
       li.innerHTML = `
         <div class="entry-top">
-          <span class="entry-term">${escapeHtml(entry.term)}</span>
+          <div class="entry-title">
+            <span class="entry-term">${escapeHtml(entry.term)}</span>
+            ${entry.phonetic ? `<span class="entry-phonetic">${escapeHtml(entry.phonetic)}</span>` : ""}
+          </div>
           <div class="entry-meta">
             <select class="status-select" data-id="${entry.id}">
               ${Object.entries(STATUS)
@@ -429,6 +495,7 @@ function render() {
       try {
         const info = await fetchDefinition(entry.term);
         updateEntry(entry.id, {
+          phonetic: info?.phonetic || "",
           meaningKo: info?.meaningKo || "",
           meaning: info?.meaning || "",
           meanings: info?.meanings || [],
@@ -449,6 +516,7 @@ function render() {
 }
 
 const PATCH_KEY_TO_DB = {
+  phonetic: "phonetic",
   meaningKo: "meaning_ko",
   meaning: "meaning",
   meanings: "meanings",
@@ -530,7 +598,7 @@ function renderDashboard() {
 }
 
 // ---------- CSV 내보내기 / 불러오기 ----------
-const CSV_HEADER = ["term", "meaningKo", "meaning", "meanings", "example", "exampleKo", "status", "note", "addedAt"];
+const CSV_HEADER = ["term", "phonetic", "meaningKo", "meaning", "meanings", "example", "exampleKo", "status", "note", "addedAt"];
 
 function toCsv(entries) {
   const rows = entries.map((e) =>
