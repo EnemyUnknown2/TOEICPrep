@@ -20,6 +20,7 @@ function dbRowToEntry(row) {
     term: row.term,
     meaningKo: row.meaning_ko || "",
     meaning: row.meaning || "",
+    meanings: Array.isArray(row.meanings) ? row.meanings : [],
     example: row.example || "",
     exampleKo: row.example_ko || "",
     status: row.status || "none",
@@ -34,6 +35,7 @@ function entryToDbRow(kind, entry) {
     term: entry.term,
     meaning_ko: entry.meaningKo || "",
     meaning: entry.meaning || "",
+    meanings: entry.meanings || [],
     example: entry.example || "",
     example_ko: entry.exampleKo || "",
     status: entry.status || "none",
@@ -102,12 +104,34 @@ const POS_LABELS = { n: "noun", v: "verb", adj: "adjective", adv: "adverb" };
 // (garner -> "가너에게"). 이런 단어는 품사 보정 없이 원래 단어 그대로 번역하는 게 더 안전하다.
 const PROPER_NOUN_SENSE = /^(a |an )?(surname|given name|place( name)?|town|city|village|county|country|unincorporated community)\b/i;
 
+function splitDef(d) {
+  const tabIndex = d.indexOf("\t");
+  const posCode = tabIndex === -1 ? "" : d.slice(0, tabIndex);
+  const text = (tabIndex === -1 ? d : d.slice(tabIndex + 1)).trim();
+  return { posCode, text };
+}
+
 function hasProperNounSense(defs) {
-  return (defs || []).some((d) => {
-    const tabIndex = d.indexOf("\t");
-    const text = (tabIndex === -1 ? d : d.slice(tabIndex + 1)).trim();
-    return PROPER_NOUN_SENSE.test(text);
-  });
+  return (defs || []).some((d) => PROPER_NOUN_SENSE.test(splitDef(d).text));
+}
+
+// 단어 하나에 품사가 여러 개 있으면(예: garner=동사/명사) TOEIC 수준에 맞게 최대 2개까지만
+// 서로 다른 품사의 뜻을 뽑는다. 사람 이름/지명 뜻(surname 등)은 TOEIC 단어장에 필요 없으니 제외.
+const MAX_SENSES = 2;
+
+function extractSenses(defs) {
+  const seen = new Set();
+  const senses = [];
+  for (const d of defs || []) {
+    const { posCode, text } = splitDef(d);
+    if (PROPER_NOUN_SENSE.test(text)) continue;
+    const posLabel = POS_LABELS[posCode] || posCode;
+    if (!posLabel || seen.has(posLabel)) continue;
+    seen.add(posLabel);
+    senses.push({ pos: posLabel, en: text });
+    if (senses.length >= MAX_SENSES) break;
+  }
+  return senses;
 }
 
 // Datamuse API: 무료, API 키 불필요, 정의와 품사 태그를 함께 제공 (dictionaryapi.dev보다 응답이 안정적)
@@ -120,16 +144,15 @@ async function fetchEnglishDefinition(term) {
     if (!res.ok) return null;
     const data = await res.json();
     const defs = data?.[0]?.defs;
-    const defRaw = defs?.[0];
-    if (!defRaw) return null;
-    const tabIndex = defRaw.indexOf("\t");
-    const posCode = tabIndex === -1 ? "" : defRaw.slice(0, tabIndex);
-    const definition = (tabIndex === -1 ? defRaw : defRaw.slice(tabIndex + 1)).trim();
-    const posLabel = POS_LABELS[posCode] || posCode;
+    if (!defs || defs.length === 0) return null;
+    const senses = extractSenses(defs);
+    const first = senses[0];
+    if (!first) return null;
     return {
-      partOfSpeech: posLabel,
+      partOfSpeech: first.pos,
       isAmbiguousProperNoun: hasProperNounSense(defs),
-      meaning: posLabel ? `(${posLabel}) ${definition}` : definition,
+      senses,
+      meaning: `(${first.pos}) ${first.en}`,
       example: "",
     };
   } catch {
@@ -194,16 +217,49 @@ async function fetchDefinition(term) {
     fetchKoreanMeaning(buildTranslationQuery(term, "verb")),
   ]);
 
-  let picked = bareKo;
-  if (!dict?.isAmbiguousProperNoun) {
-    if (dict?.partOfSpeech === "adjective" && adjKo.text) picked = adjKo;
-    else if (dict?.partOfSpeech === "verb" && verbKo.text) picked = verbKo;
-  }
+  // "to garner" -> "가너에게", "to apple" -> "사과로"처럼, 동사 문형("to X")은 그 단어가 진짜
+  // 동사로 잘 안 쓰이면 번역기가 사람 이름/명사+조사로 오해해서 실패하는 경우가 있다. 정상적으로
+  // 동사를 옮긴 한국어는 거의 항상 "~다"로 끝나므로(예: 협상하다, 준수하다), 그렇지 않으면 실패로
+  // 보고 원래 단어(bare) 번역으로 대체한다.
+  const isUsableVerbKo = verbKo.text && verbKo.text.endsWith("다");
+
+  const koForPos = (pos) => {
+    if (dict?.isAmbiguousProperNoun) return bareKo.text;
+    if (pos === "adjective" && adjKo.text) return adjKo.text;
+    if (pos === "verb" && isUsableVerbKo) return verbKo.text;
+    return bareKo.text;
+  };
+
+  const primaryKo = dict?.isAmbiguousProperNoun ? bareKo
+    : dict?.partOfSpeech === "adjective" && adjKo.text ? adjKo
+    : dict?.partOfSpeech === "verb" && isUsableVerbKo ? verbKo
+    : bareKo;
+  const picked = {
+    text: koForPos(dict?.partOfSpeech),
+    example: primaryKo.example || bareKo.example,
+    exampleKo: primaryKo.exampleKo || bareKo.exampleKo,
+  };
+
+  // 품사가 여러 개면(예: garner=동사/명사) TOEIC 수준에서 헷갈리지 않게 각 품사별 뜻을 따로 보여준다.
+  // 번역이 실패해 다른 품사와 같은 뜻으로 겹치면(예: apple의 동사 뜻이 명사와 같아짐) 정보가
+  // 없는 것과 같으니 제외한다.
+  const seenKo = new Set();
+  const meanings =
+    !dict?.isAmbiguousProperNoun && dict?.senses?.length > 1
+      ? dict.senses
+          .map((s) => ({ pos: s.pos, en: s.en, ko: koForPos(s.pos) }))
+          .filter((m) => {
+            if (seenKo.has(m.ko)) return false;
+            seenKo.add(m.ko);
+            return true;
+          })
+      : [];
 
   if (!dict && !picked.text) return null;
   return {
     meaningKo: picked.text,
     meaning: dict?.meaning || "",
+    meanings,
     example: picked.example || "",
     exampleKo: picked.exampleKo || "",
   };
@@ -246,6 +302,7 @@ async function addEntry(kind, term) {
     term,
     meaningKo: info?.meaningKo || "",
     meaning: info?.meaning || "",
+    meanings: info?.meanings || [],
     example: info?.example || "",
     exampleKo: info?.exampleKo || "",
     status: "none",
@@ -300,9 +357,7 @@ function render(kind) {
             <button class="delete-btn" data-id="${entry.id}" title="삭제">✕</button>
           </div>
         </div>
-        ${entry.meaningKo ? `<p class="entry-meaning-ko">${escapeHtml(entry.meaningKo)}</p>` : ""}
-        ${entry.meaning ? `<p class="entry-meaning">${escapeHtml(entry.meaning)}</p>` : ""}
-        ${!entry.meaningKo && !entry.meaning ? `<p class="entry-meaning" style="color:var(--muted)">뜻을 찾지 못했습니다. 메모에 직접 입력해 주세요.</p>` : ""}
+        ${renderMeanings(entry)}
         ${entry.example ? `
         <div class="entry-example-block">
           <p class="entry-example">${escapeHtml(entry.example)}</p>
@@ -341,6 +396,7 @@ function render(kind) {
         updateEntry(kind, entry.id, {
           meaningKo: info?.meaningKo || "",
           meaning: info?.meaning || "",
+          meanings: info?.meanings || [],
           example: info?.example || "",
           exampleKo: info?.exampleKo || "",
         });
@@ -360,6 +416,7 @@ function render(kind) {
 const PATCH_KEY_TO_DB = {
   meaningKo: "meaning_ko",
   meaning: "meaning",
+  meanings: "meanings",
   example: "example",
   exampleKo: "example_ko",
   status: "status",
@@ -392,6 +449,34 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+const POS_KO_LABELS = { noun: "명사", verb: "동사", adjective: "형용사", adverb: "부사" };
+
+// 품사가 여러 개인 단어는 각각 따로, 하나뿐이면 기존처럼 한 줄로 보여준다.
+function renderMeanings(entry) {
+  if (entry.meanings && entry.meanings.length > 1) {
+    return `
+      <div class="entry-senses">
+        ${entry.meanings
+          .map(
+            (m) => `
+          <p class="entry-sense">
+            <span class="entry-sense-pos">${escapeHtml(POS_KO_LABELS[m.pos] || m.pos)}</span>
+            ${m.ko ? `<span class="entry-meaning-ko">${escapeHtml(m.ko)}</span>` : ""}
+            ${m.en ? `<span class="entry-meaning">${escapeHtml(m.en)}</span>` : ""}
+          </p>`
+          )
+          .join("")}
+      </div>`;
+  }
+  if (!entry.meaningKo && !entry.meaning) {
+    return `<p class="entry-meaning" style="color:var(--muted)">뜻을 찾지 못했습니다. 메모에 직접 입력해 주세요.</p>`;
+  }
+  return `
+    ${entry.meaningKo ? `<p class="entry-meaning-ko">${escapeHtml(entry.meaningKo)}</p>` : ""}
+    ${entry.meaning ? `<p class="entry-meaning">${escapeHtml(entry.meaning)}</p>` : ""}
+  `;
+}
+
 // ---------- 진행 상황 대시보드 ----------
 function renderDashboard() {
   ["words", "grammar"].forEach((kind) => {
@@ -413,10 +498,13 @@ function renderDashboard() {
 }
 
 // ---------- CSV 내보내기 / 불러오기 ----------
+const CSV_HEADER = ["term", "meaningKo", "meaning", "meanings", "example", "exampleKo", "status", "note", "addedAt"];
+
 function toCsv(entries) {
-  const header = ["term", "meaningKo", "meaning", "example", "exampleKo", "status", "note", "addedAt"];
-  const rows = entries.map((e) => header.map((h) => csvEscape(e[h])).join(","));
-  return [header.join(","), ...rows].join("\n");
+  const rows = entries.map((e) =>
+    CSV_HEADER.map((h) => csvEscape(h === "meanings" ? JSON.stringify(e.meanings || []) : e[h])).join(",")
+  );
+  return [CSV_HEADER.join(","), ...rows].join("\n");
 }
 
 function csvEscape(val) {
@@ -432,6 +520,11 @@ function parseCsv(text) {
     const obj = {};
     header.forEach((h, i) => (obj[h] = cells[i] || ""));
     if (!STATUS[obj.status]) obj.status = "none";
+    try {
+      obj.meanings = obj.meanings ? JSON.parse(obj.meanings) : [];
+    } catch {
+      obj.meanings = [];
+    }
     return obj;
   });
 }
@@ -580,9 +673,7 @@ function renderTestCard() {
   const answerEl = document.getElementById("test-card-answer");
   answerEl.style.display = "none";
   answerEl.innerHTML = `
-    ${entry.meaningKo ? `<p class="entry-meaning-ko">${escapeHtml(entry.meaningKo)}</p>` : ""}
-    ${entry.meaning ? `<p class="entry-meaning">${escapeHtml(entry.meaning)}</p>` : ""}
-    ${!entry.meaningKo && !entry.meaning ? `<p class="entry-meaning" style="color:var(--muted)">등록된 뜻이 없습니다.</p>` : ""}
+    ${renderMeanings(entry)}
     ${entry.example ? `
     <div class="entry-example-block">
       <p class="entry-example">${escapeHtml(entry.example)}</p>

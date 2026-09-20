@@ -15,6 +15,7 @@ TOEIC 시험 대비용 단어/숙어/문법 정리 및 이해도 진행 상황 �
 - **단어 및 숙어**: 추가 시 자동으로 뜻을 검색해 저장 (찾지 못하면 직접 메모에 입력)
   - 영어 정의 + 품사: [Datamuse API](https://www.datamuse.com/api/)
   - 한국어 뜻: [MyMemory Translation API](https://mymemory.translated.net/) — 품사를 알면 ("to be eligible", "to negotiate"처럼) 품사에 맞는 짧은 문형으로 다시 물어봐서 더 정확한 번역을 시도합니다. (예: "eligible" 단독 번역은 명사형 "자격"이 나오지만, 품사를 반영하면 "자격을 갖추다"로 정확해짐)
+  - **여러 뜻**: 단어에 서로 다른 품사의 뜻이 여러 개 있으면(예: eligible = 형용사/명사, garner = 동사/명사) TOEIC 수준에서 헷갈리지 않게 최대 2개까지 품사 배지와 함께 나란히 보여줍니다. 사람 이름/지명 뜻이 섞여 있거나 번역이 실패해 다른 뜻과 겹치는 경우는 제외합니다.
   - 예문: MyMemory 응답에 포함된 실제 번역 메모리(사람이 번역한 문장 쌍)에서 품질이 좋은 것을 발견하면 영어 예문 + 한국어 번역을 함께 표시합니다. 못 찾으면 생략됩니다.
 - **문법**: [grammar-data.js](grammar-data.js)에 내장된 TOEIC Part 5/6 빈출 문법 포인트(조동사, 수동태, 가정법, 관계대명사 등 약 25개)에서 키워드 매칭으로 한국어 설명과 예문을 가져옵니다. 외부 API 호출 없이 즉시 동작하며, 목록에 없는 패턴은 영어 단일 용어(gerund 등)로 간주해 Datamuse API로 보조 검색합니다.
 - 항목별 이해도 상태(미숙지/학습중/이해함) 표시 및 메모 작성
@@ -39,7 +40,8 @@ TOEIC 시험 대비용 단어/숙어/문법 정리 및 이해도 진행 상황 �
 기환스 사이트 방명록과 같은 Supabase 프로젝트(`obmipvrmbxohcxhnpgmp`)를 재사용합니다. 새로 이 프로젝트를 세팅하는 경우:
 
 1. Supabase 대시보드 > SQL Editor에서 [supabase/schema.sql](supabase/schema.sql)을 실행해 `toeic_entries` 테이블과 RLS 정책을 만듭니다.
-2. `script.js`의 `SUPABASE_URL` / `SUPABASE_ANON_KEY`를 프로젝트에 맞게 수정합니다.
+2. 이어서 [supabase/migration_002_multi_meaning.sql](supabase/migration_002_multi_meaning.sql)을 실행해 여러 뜻 저장용 `meanings` 컬럼을 추가합니다.
+3. `script.js`의 `SUPABASE_URL` / `SUPABASE_ANON_KEY`를 프로젝트에 맞게 수정합니다.
 
 **로그인 없이 공개 테이블**이라, URL과 anon key를 아는 사람은 누구나 데이터를 읽고 쓸 수 있습니다 (방명록과 동일한 트레이드오프이며, 의도적으로 선택한 방식입니다). 개인정보 보호가 중요해지면 Supabase Auth로 로그인을 추가하고 RLS를 `auth.uid()` 기준으로 좁히는 방향으로 전환할 수 있습니다.
 
