@@ -333,12 +333,6 @@ main {
   align-items: flex-start;
 }
 
-.test-option-row {
-  display: flex;
-  gap: 20px;
-  font-size: 14px;
-}
-
 .test-checkbox {
   display: flex;
   align-items: center;

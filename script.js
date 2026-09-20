@@ -10,7 +10,7 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ibWlwdnJtYnhvaGN4aG5wZ21wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2MjQxNjcsImV4cCI6MjEwNTIwMDE2N30.tHAKwlSbgMH37_G81U5Q_gE29OL20nILPT8Aoea9lAI";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const LEGACY_STORE_KEYS = { words: "toeic_words", grammar: "toeic_grammar" };
+const LEGACY_STORE_KEY = "toeic_words";
 const MIGRATION_DONE_KEY = "toeic_migrated_to_supabase";
 
 // DB(snake_case) <-> 화면에서 쓰는 JS 객체(camelCase) 변환
@@ -29,9 +29,9 @@ function dbRowToEntry(row) {
   };
 }
 
-function entryToDbRow(kind, entry) {
+function entryToDbRow(entry) {
   return {
-    kind,
+    kind: "words",
     term: entry.term,
     meaning_ko: entry.meaningKo || "",
     meaning: entry.meaning || "",
@@ -43,11 +43,11 @@ function entryToDbRow(kind, entry) {
   };
 }
 
-const state = { words: [], grammar: [] };
+const state = { words: [] };
 
-function loadLegacyLocalEntries(kind) {
+function loadLegacyLocalEntries() {
   try {
-    return JSON.parse(localStorage.getItem(LEGACY_STORE_KEYS[kind])) || [];
+    return JSON.parse(localStorage.getItem(LEGACY_STORE_KEY)) || [];
   } catch {
     return [];
   }
@@ -57,13 +57,7 @@ function loadLegacyLocalEntries(kind) {
 async function migrateLegacyDataIfNeeded() {
   if (localStorage.getItem(MIGRATION_DONE_KEY)) return;
 
-  const legacyWords = loadLegacyLocalEntries("words");
-  const legacyGrammar = loadLegacyLocalEntries("grammar");
-  const rows = [
-    ...legacyWords.map((e) => entryToDbRow("words", e)),
-    ...legacyGrammar.map((e) => entryToDbRow("grammar", e)),
-  ];
-
+  const rows = loadLegacyLocalEntries().map(entryToDbRow);
   if (rows.length > 0) {
     const { error } = await sb.from("toeic_entries").insert(rows);
     if (error) throw error;
@@ -76,11 +70,11 @@ async function loadAllEntries() {
   const { data, error } = await sb
     .from("toeic_entries")
     .select("*")
+    .eq("kind", "words")
     .order("created_at", { ascending: true });
   if (error) throw error;
 
-  state.words = (data || []).filter((r) => r.kind === "words").map(dbRowToEntry);
-  state.grammar = (data || []).filter((r) => r.kind === "grammar").map(dbRowToEntry);
+  state.words = (data || []).map(dbRowToEntry);
 }
 
 // ---------- 사전 API로 자동 정보 조회 ----------
@@ -178,6 +172,12 @@ function buildTranslationQuery(term, partOfSpeech) {
   return term;
 }
 
+// 한국어로 번역해 달라고 했는데 한글이 하나도 없으면(예: "lax" -> "LAX", 로스앤젤레스 공항
+// 코드와 헷갈림) 번역이 아니라 이름/코드 같은 걸 그대로 돌려준 것이니 실패로 취급한다.
+function containsHangul(str) {
+  return /[가-힣]/.test(str || "");
+}
+
 // MyMemory 번역 API로 한국어 뜻 조회 (무료, API 키 불필요).
 //
 // responseData.translatedText는 MyMemory가 크라우드소싱 번역 메모리 중 "가장 유사한 문장"을
@@ -197,13 +197,14 @@ async function fetchKoreanMeaning(term) {
 
     const matches = data?.matches || [];
     const mtEntry = matches.find((m) => m.id === 0 || m["created-by"] === "MT!");
-    const text = (mtEntry?.translation || data?.responseData?.translatedText || "").trim();
+    let text = (mtEntry?.translation || data?.responseData?.translatedText || "").trim();
+    if (!containsHangul(text)) text = "";
 
     const goodMatch = matches.find((m) => {
       const quality = Number(m.quality) || 0;
       const isRealTM = m.id !== 0 && m["created-by"] !== "MT!";
       const looksLikeSentence = (m.segment || "").trim().length > term.length + 3;
-      return isRealTM && quality >= 60 && looksLikeSentence && m.segment && m.translation;
+      return isRealTM && quality >= 60 && looksLikeSentence && m.segment && m.translation && containsHangul(m.translation);
     });
 
     return {
@@ -214,6 +215,42 @@ async function fetchKoreanMeaning(term) {
   } catch {
     return { text: "", example: "", exampleKo: "" };
   }
+}
+
+// ---------- 내장 데이터셋(숙어/다의어)에서 검색하는 공통 로직 ----------
+function normalizeMatchText(str) {
+  return str.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+// bidirectional: true면 서로 포함하기만 해도 매칭. false면 (숙어처럼) target이 keyword 전체를
+// 포함할 때만 매칭 — "eligible"이 "be eligible for" 안에 들어있다고 해서 거꾸로 "be eligible
+// for" 숙어에 잘못 걸리는 걸 막는다.
+function findInKeywordDataset(term, dataset, bidirectional = true) {
+  const target = normalizeMatchText(term);
+  if (!target || !dataset) return null;
+
+  for (const entry of dataset) {
+    if (entry.keywords.some((k) => normalizeMatchText(k) === target)) return entry;
+  }
+  for (const entry of dataset) {
+    if (entry.keywords.some((k) => {
+      const nk = normalizeMatchText(k);
+      return bidirectional ? nk.includes(target) || target.includes(nk) : target.includes(nk);
+    })) return entry;
+  }
+  return null;
+}
+
+// (Datamuse에 정의가 없거나, 번역 API가 단어 그대로 직역해서 실패하는 경우가 많아 별도로 관리)
+function findLocalIdiom(term) {
+  return findInKeywordDataset(term, typeof TOEIC_IDIOMS !== "undefined" ? TOEIC_IDIOMS : null, false);
+}
+
+// 진짜 다의어는 직접 정리한 데이터셋에서 정확히 일치할 때만 검색한다 (부분 일치 없음).
+function findLocalMultiMeaning(term) {
+  if (typeof TOEIC_MULTI_MEANINGS === "undefined") return null;
+  const target = normalizeMatchText(term);
+  return TOEIC_MULTI_MEANINGS.find((entry) => normalizeMatchText(entry.term) === target) || null;
 }
 
 async function fetchDefinition(term) {
@@ -252,11 +289,6 @@ async function fetchDefinition(term) {
   // 보고 원래 단어(bare) 번역으로 대체한다.
   const isUsableVerbKo = verbKo.text && verbKo.text.endsWith("다");
 
-  // "complimentary"(무료의/칭찬하는 두 뜻)처럼 같은 품사 안에 서로 다른 뜻이 있으면 "to be X"
-  // 문형이 엉뚱한 쪽으로 넘어갈 수 있다. 하지만 Datamuse의 같은 품사 정의 개수는 이런 진짜
-  // 동음이의어와, "competent"처럼 뜻은 하나인데 분야별 기술적 정의만 여러 개인 경우를 구분하지
-  // 못해서(둘 다 여러 개로 잡힘) 믿을 만한 신호가 아니었다 — 시도했다가 되돌렸다. 이런 드문
-  // 동음이의어 오역은 알려진 한계로 남겨두고, ⟳ 버튼이나 메모로 직접 고치는 편이 더 안전하다.
   const koForPos = (pos) => {
     if (dict?.isAmbiguousProperNoun) return bareKo.text;
     if (pos === "adjective" && adjKo.text) return adjKo.text;
@@ -299,59 +331,9 @@ async function fetchDefinition(term) {
   };
 }
 
-// ---------- 내장 데이터셋(문법/숙어)에서 키워드로 검색하는 공통 로직 ----------
-function normalizeMatchText(str) {
-  return str.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-// bidirectional: true면 (문법처럼) 서로 포함하기만 해도 매칭. false면 (숙어처럼) target이
-// keyword 전체를 포함할 때만 매칭 — "eligible"이 "be eligible for" 안에 들어있다고 해서
-// 거꾸로 "be eligible for" 숙어에 잘못 걸리는 걸 막는다.
-function findInKeywordDataset(term, dataset, bidirectional = true) {
-  const target = normalizeMatchText(term);
-  if (!target || !dataset) return null;
-
-  for (const entry of dataset) {
-    if (entry.keywords.some((k) => normalizeMatchText(k) === target)) return entry;
-  }
-  for (const entry of dataset) {
-    if (entry.keywords.some((k) => {
-      const nk = normalizeMatchText(k);
-      return bidirectional ? nk.includes(target) || target.includes(nk) : target.includes(nk);
-    })) return entry;
-  }
-  return null;
-}
-
-function findLocalGrammar(term) {
-  return findInKeywordDataset(term, typeof TOEIC_GRAMMAR !== "undefined" ? TOEIC_GRAMMAR : null);
-}
-
-async function fetchGrammarInfo(term) {
-  const local = findLocalGrammar(term);
-  if (local) {
-    return { meaningKo: local.explanation, meaning: "", example: local.example || "" };
-  }
-  // 데이터셋에 없으면 영어 단일 용어(gerund 등)로 간주하고 사전 API로 보조 검색
-  return await fetchDefinition(term);
-}
-
-// ---------- 숙어: 내장 TOEIC 구동사/숙어 데이터셋에서 검색 ----------
-// (Datamuse에 정의가 없거나, 번역 API가 단어 그대로 직역해서 실패하는 경우가 많아 별도로 관리)
-function findLocalIdiom(term) {
-  return findInKeywordDataset(term, typeof TOEIC_IDIOMS !== "undefined" ? TOEIC_IDIOMS : null, false);
-}
-
-// ---------- 진짜 다의어: 직접 정리한 데이터셋에서 정확히 일치할 때만 검색 ----------
-function findLocalMultiMeaning(term) {
-  if (typeof TOEIC_MULTI_MEANINGS === "undefined") return null;
-  const target = normalizeMatchText(term);
-  return TOEIC_MULTI_MEANINGS.find((entry) => normalizeMatchText(entry.term) === target) || null;
-}
-
 // ---------- 항목 추가 ----------
-async function addEntry(kind, term) {
-  const info = kind === "grammar" ? await fetchGrammarInfo(term) : await fetchDefinition(term);
+async function addEntry(term) {
+  const info = await fetchDefinition(term);
   const draft = {
     term,
     meaningKo: info?.meaningKo || "",
@@ -365,7 +347,7 @@ async function addEntry(kind, term) {
 
   const { data, error } = await sb
     .from("toeic_entries")
-    .insert(entryToDbRow(kind, draft))
+    .insert(entryToDbRow(draft))
     .select()
     .single();
 
@@ -374,17 +356,17 @@ async function addEntry(kind, term) {
     return;
   }
 
-  state[kind].push(dbRowToEntry(data));
-  render(kind);
+  state.words.push(dbRowToEntry(data));
+  render();
 }
 
 // ---------- 목록 렌더링 ----------
 let dataLoaded = false;
 
-function render(kind) {
-  const listEl = document.getElementById(`${kind}-list`);
+function render() {
+  const listEl = document.getElementById("words-list");
   if (!listEl) return;
-  const entries = state[kind];
+  const entries = state.words;
   listEl.innerHTML = "";
 
   if (entries.length === 0) {
@@ -424,15 +406,15 @@ function render(kind) {
 
   listEl.querySelectorAll(".status-select").forEach((sel) => {
     sel.addEventListener("change", () => {
-      updateEntry(kind, sel.dataset.id, { status: sel.value });
+      updateEntry(sel.dataset.id, { status: sel.value });
     });
   });
 
   listEl.querySelectorAll(".delete-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.id;
-      state[kind] = state[kind].filter((e) => e.id !== id);
-      render(kind);
+      state.words = state.words.filter((e) => e.id !== id);
+      render();
       const { error } = await sb.from("toeic_entries").delete().eq("id", id);
       if (error) alert("삭제에 실패했습니다: " + error.message);
     });
@@ -440,14 +422,13 @@ function render(kind) {
 
   listEl.querySelectorAll(".refetch-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const entry = state[kind].find((e) => e.id === btn.dataset.id);
+      const entry = state.words.find((e) => e.id === btn.dataset.id);
       if (!entry) return;
-      const originalLabel = btn.textContent;
       btn.disabled = true;
       btn.textContent = "…";
       try {
-        const info = kind === "grammar" ? await fetchGrammarInfo(entry.term) : await fetchDefinition(entry.term);
-        updateEntry(kind, entry.id, {
+        const info = await fetchDefinition(entry.term);
+        updateEntry(entry.id, {
           meaningKo: info?.meaningKo || "",
           meaning: info?.meaning || "",
           meanings: info?.meanings || [],
@@ -455,14 +436,14 @@ function render(kind) {
           exampleKo: info?.exampleKo || "",
         });
       } finally {
-        render(kind);
+        render();
       }
     });
   });
 
   listEl.querySelectorAll(".entry-note").forEach((ta) => {
     ta.addEventListener("change", () => {
-      updateEntry(kind, ta.dataset.id, { note: ta.value });
+      updateEntry(ta.dataset.id, { note: ta.value });
     });
   });
 }
@@ -477,9 +458,8 @@ const PATCH_KEY_TO_DB = {
   note: "note",
 };
 
-function updateEntry(kind, id, patch) {
-  const entries = state[kind];
-  const entry = entries.find((e) => e.id === id);
+function updateEntry(id, patch) {
+  const entry = state.words.find((e) => e.id === id);
   if (!entry) return;
   Object.assign(entry, patch);
 
@@ -533,22 +513,20 @@ function renderMeanings(entry) {
 
 // ---------- 진행 상황 대시보드 ----------
 function renderDashboard() {
-  ["words", "grammar"].forEach((kind) => {
-    const entries = state[kind];
-    const total = entries.length;
-    const doneCount = entries.filter((e) => e.status === "done").length;
-    const learningCount = entries.filter((e) => e.status === "learning").length;
-    const noneCount = entries.filter((e) => e.status === "none").length;
-    const pct = total ? Math.round((doneCount / total) * 100) : 0;
+  const entries = state.words;
+  const total = entries.length;
+  const doneCount = entries.filter((e) => e.status === "done").length;
+  const learningCount = entries.filter((e) => e.status === "learning").length;
+  const noneCount = entries.filter((e) => e.status === "none").length;
+  const pct = total ? Math.round((doneCount / total) * 100) : 0;
 
-    document.getElementById(`${kind}-total`).textContent = `${total}개 등록됨`;
-    document.getElementById(`${kind}-progress`).style.width = `${pct}%`;
-    document.getElementById(`${kind}-breakdown`).innerHTML = `
-      <span><span class="dot" style="background:${STATUS.done.color}"></span>이해함 ${doneCount}</span>
-      <span><span class="dot" style="background:${STATUS.learning.color}"></span>학습중 ${learningCount}</span>
-      <span><span class="dot" style="background:${STATUS.none.color}"></span>미숙지 ${noneCount}</span>
-    `;
-  });
+  document.getElementById("words-total").textContent = `${total}개 등록됨`;
+  document.getElementById("words-progress").style.width = `${pct}%`;
+  document.getElementById("words-breakdown").innerHTML = `
+    <span><span class="dot" style="background:${STATUS.done.color}"></span>이해함 ${doneCount}</span>
+    <span><span class="dot" style="background:${STATUS.learning.color}"></span>학습중 ${learningCount}</span>
+    <span><span class="dot" style="background:${STATUS.none.color}"></span>미숙지 ${noneCount}</span>
+  `;
 }
 
 // ---------- CSV 내보내기 / 불러오기 ----------
@@ -611,17 +589,17 @@ function splitCsvLine(line) {
   return result;
 }
 
-function setupCsvButtons(kind) {
-  const exportBtn = document.getElementById(`${kind}-export`);
-  const importInput = document.getElementById(`${kind}-import`);
+function setupCsvButtons() {
+  const exportBtn = document.getElementById("words-export");
+  const importInput = document.getElementById("words-import");
 
   exportBtn?.addEventListener("click", () => {
-    const csv = toCsv(state[kind]);
+    const csv = toCsv(state.words);
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${kind === "words" ? "단어및숙어" : "문법"}.csv`;
+    a.download = "단어및숙어.csv";
     a.click();
     URL.revokeObjectURL(url);
   });
@@ -633,14 +611,14 @@ function setupCsvButtons(kind) {
     reader.onload = async () => {
       const imported = parseCsv(reader.result);
       if (imported.length === 0) return;
-      const rows = imported.map((e) => entryToDbRow(kind, e));
+      const rows = imported.map(entryToDbRow);
       const { data, error } = await sb.from("toeic_entries").insert(rows).select();
       if (error) {
         alert("CSV 불러오기에 실패했습니다: " + error.message);
         return;
       }
-      state[kind] = state[kind].concat((data || []).map(dbRowToEntry));
-      render(kind);
+      state.words = state.words.concat((data || []).map(dbRowToEntry));
+      render();
     };
     reader.readAsText(file, "utf-8");
     e.target.value = "";
@@ -659,11 +637,11 @@ function setupTabs() {
   });
 }
 
-function setupForm(kind, formId, inputId) {
-  const form = document.getElementById(formId);
+function setupForm() {
+  const form = document.getElementById("words-form");
   form?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const input = document.getElementById(inputId);
+    const input = document.getElementById("words-input");
     const term = input.value.trim();
     if (!term) return;
     const submitBtn = form.querySelector("button[type='submit']");
@@ -673,7 +651,7 @@ function setupForm(kind, formId, inputId) {
     submitBtn.disabled = true;
     submitBtn.textContent = "검색 중...";
     try {
-      await addEntry(kind, term);
+      await addEntry(term);
     } finally {
       input.disabled = false;
       submitBtn.disabled = false;
@@ -684,10 +662,10 @@ function setupForm(kind, formId, inputId) {
 }
 
 // ---------- 자가 테스트 ----------
-const testState = { kind: null, queue: [], index: 0, results: {} };
+const testState = { queue: [], index: 0, results: {} };
 
-function buildTestQueue(kind, onlyUnfinished) {
-  let entries = state[kind].slice();
+function buildTestQueue(onlyUnfinished) {
+  let entries = state.words.slice();
   if (onlyUnfinished) entries = entries.filter((e) => e.status !== "done");
   for (let i = entries.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -697,9 +675,8 @@ function buildTestQueue(kind, onlyUnfinished) {
 }
 
 function startTest() {
-  const kind = document.querySelector('input[name="test-kind"]:checked')?.value || "words";
   const onlyUnfinished = document.getElementById("test-only-unfinished")?.checked ?? true;
-  const queue = buildTestQueue(kind, onlyUnfinished);
+  const queue = buildTestQueue(onlyUnfinished);
   const emptyMsg = document.getElementById("test-empty-msg");
 
   if (queue.length === 0) {
@@ -708,7 +685,6 @@ function startTest() {
   }
   if (emptyMsg) emptyMsg.style.display = "none";
 
-  testState.kind = kind;
   testState.queue = queue;
   testState.index = 0;
   testState.results = { done: 0, learning: 0, none: 0 };
@@ -748,7 +724,7 @@ function revealTestAnswer() {
 
 function rateTestCard(status) {
   const entry = testState.queue[testState.index];
-  updateEntry(testState.kind, entry.id, { status });
+  updateEntry(entry.id, { status });
   testState.results[status] = (testState.results[status] || 0) + 1;
 
   testState.index++;
@@ -765,13 +741,13 @@ function finishTest() {
   const r = testState.results;
   document.getElementById("test-done-summary").textContent =
     `이해함 ${r.done || 0} · 학습중 ${r.learning || 0} · 미숙지 ${r.none || 0}`;
-  render(testState.kind);
+  render();
 }
 
 function stopTest() {
   document.getElementById("test-runner").style.display = "none";
   document.getElementById("test-setup").style.display = "block";
-  render(testState.kind);
+  render();
 }
 
 function setupTest() {
@@ -798,20 +774,16 @@ async function loadAndRender() {
     console.error(err);
     return;
   }
-  render("words");
-  render("grammar");
+  render();
 }
 
 function init() {
   setupTabs();
-  setupForm("words", "words-form", "words-input");
-  setupForm("grammar", "grammar-form", "grammar-input");
-  setupCsvButtons("words");
-  setupCsvButtons("grammar");
+  setupForm();
+  setupCsvButtons();
   setupTest();
   document.getElementById("load-retry")?.addEventListener("click", loadAndRender);
-  render("words");
-  render("grammar");
+  render();
   loadAndRender();
 }
 

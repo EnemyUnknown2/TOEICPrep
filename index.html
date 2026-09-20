@@ -9,7 +9,7 @@
 <body>
   <header class="app-header">
     <h1>TOEIC 준비</h1>
-    <p class="subtitle">모르는 단어/숙어와 문법을 정리하고 이해도를 확인하세요</p>
+    <p class="subtitle">모르는 단어/숙어를 정리하고 이해도를 확인하세요</p>
     <p class="load-error" id="load-error" style="display:none">
       데이터를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤
       <button id="load-retry">다시 시도</button>
@@ -18,7 +18,6 @@
 
   <nav class="tabs">
     <button class="tab-btn active" data-tab="words">단어 및 숙어</button>
-    <button class="tab-btn" data-tab="grammar">문법</button>
     <button class="tab-btn" data-tab="test">자가 테스트</button>
     <button class="tab-btn" data-tab="dashboard">진행 상황</button>
   </nav>
@@ -41,36 +40,15 @@
       <ul class="entry-list" id="words-list"></ul>
     </section>
 
-    <!-- 문법 -->
-    <section id="grammar" class="tab-panel">
-      <form class="add-form" id="grammar-form">
-        <input type="text" id="grammar-input" placeholder="문법 키워드를 입력하세요 (예: 조동사 + 동사원형)" required>
-        <button type="submit">추가</button>
-      </form>
-      <p class="hint">TOEIC에 자주 나오는 문법 패턴(예: "조동사 + 동사원형", "가정법", "관계대명사")을 입력하면 내장된 설명을 찾아옵니다. 찾지 못하면 직접 입력해 주세요.</p>
-      <div class="toolbar">
-        <button id="grammar-export">CSV 내보내기</button>
-        <label class="file-btn">
-          CSV 불러오기
-          <input type="file" id="grammar-import" accept=".csv" hidden>
-        </label>
-      </div>
-      <ul class="entry-list" id="grammar-list"></ul>
-    </section>
-
     <!-- 자가 테스트 -->
     <section id="test" class="tab-panel">
       <div class="test-setup" id="test-setup">
-        <div class="test-option-row">
-          <label><input type="radio" name="test-kind" value="words" checked> 단어 및 숙어</label>
-          <label><input type="radio" name="test-kind" value="grammar"> 문법</label>
-        </div>
         <label class="test-checkbox">
           <input type="checkbox" id="test-only-unfinished" checked>
           미숙지 · 학습중 항목만 (이해함 제외)
         </label>
         <button id="test-start">테스트 시작</button>
-        <p class="hint" id="test-empty-msg" style="display:none">테스트할 항목이 없습니다. 먼저 단어나 문법을 등록해 주세요.</p>
+        <p class="hint" id="test-empty-msg" style="display:none">테스트할 항목이 없습니다. 먼저 단어를 등록해 주세요.</p>
       </div>
 
       <div class="test-runner" id="test-runner" style="display:none">
@@ -104,20 +82,13 @@
           <div class="progress-bar"><div class="progress-fill" id="words-progress"></div></div>
           <div class="status-breakdown" id="words-breakdown"></div>
         </div>
-        <div class="stat-card">
-          <h3>문법</h3>
-          <p class="stat-total" id="grammar-total">0개</p>
-          <div class="progress-bar"><div class="progress-fill" id="grammar-progress"></div></div>
-          <div class="status-breakdown" id="grammar-breakdown"></div>
-        </div>
       </div>
     </section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="grammar-data.js?v=15"></script>
-  <script src="idioms-data.js?v=15"></script>
-  <script src="multi-meaning-data.js?v=15"></script>
-  <script src="script.js?v=15"></script>
+  <script src="idioms-data.js?v=16"></script>
+  <script src="multi-meaning-data.js?v=16"></script>
+  <script src="script.js?v=16"></script>
 </body>
 </html>
