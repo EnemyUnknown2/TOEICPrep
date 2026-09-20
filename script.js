@@ -97,6 +97,19 @@ async function fetchWithTimeout(url, ms) {
 
 const POS_LABELS = { n: "noun", v: "verb", adj: "adjective", adv: "adverb" };
 
+// 이 단어에 사람 성씨/지명 뜻도 있으면(garner=Garner 성씨, 예: "A surname.", "A town in...")
+// "to garner"처럼 문형으로 바꿔 물어봤을 때 번역기가 사람 이름으로 오해하기 쉽다
+// (garner -> "가너에게"). 이런 단어는 품사 보정 없이 원래 단어 그대로 번역하는 게 더 안전하다.
+const PROPER_NOUN_SENSE = /^(a |an )?(surname|given name|place( name)?|town|city|village|county|country|unincorporated community)\b/i;
+
+function hasProperNounSense(defs) {
+  return (defs || []).some((d) => {
+    const tabIndex = d.indexOf("\t");
+    const text = (tabIndex === -1 ? d : d.slice(tabIndex + 1)).trim();
+    return PROPER_NOUN_SENSE.test(text);
+  });
+}
+
 // Datamuse API: 무료, API 키 불필요, 정의와 품사 태그를 함께 제공 (dictionaryapi.dev보다 응답이 안정적)
 async function fetchEnglishDefinition(term) {
   try {
@@ -106,7 +119,8 @@ async function fetchEnglishDefinition(term) {
     );
     if (!res.ok) return null;
     const data = await res.json();
-    const defRaw = data?.[0]?.defs?.[0];
+    const defs = data?.[0]?.defs;
+    const defRaw = defs?.[0];
     if (!defRaw) return null;
     const tabIndex = defRaw.indexOf("\t");
     const posCode = tabIndex === -1 ? "" : defRaw.slice(0, tabIndex);
@@ -114,6 +128,7 @@ async function fetchEnglishDefinition(term) {
     const posLabel = POS_LABELS[posCode] || posCode;
     return {
       partOfSpeech: posLabel,
+      isAmbiguousProperNoun: hasProperNounSense(defs),
       meaning: posLabel ? `(${posLabel}) ${definition}` : definition,
       example: "",
     };
@@ -180,8 +195,10 @@ async function fetchDefinition(term) {
   ]);
 
   let picked = bareKo;
-  if (dict?.partOfSpeech === "adjective" && adjKo.text) picked = adjKo;
-  else if (dict?.partOfSpeech === "verb" && verbKo.text) picked = verbKo;
+  if (!dict?.isAmbiguousProperNoun) {
+    if (dict?.partOfSpeech === "adjective" && adjKo.text) picked = adjKo;
+    else if (dict?.partOfSpeech === "verb" && verbKo.text) picked = verbKo;
+  }
 
   if (!dict && !picked.text) return null;
   return {
