@@ -367,19 +367,26 @@ async function fetchDefinition(term) {
     exampleKo: primaryKo.exampleKo || bareKo.exampleKo,
   };
 
+  // 명사(등 전용 문형이 없는 품사)는 bare 번역을 그대로 재사용하는데, "obsolete"처럼 압도적으로
+  // 형용사로 쓰이는 단어는 bare 번역 자체가 형용사/동사형 어미(예: "쓸모 없는")로 끝나는 값을
+  // 준다. 명사 라벨에 형용사형 번역이 붙는 건 품사가 안 맞는 것이니 버린다.
+  const looksLikeAdjectiveOrVerbForm = (text) => /(는|ㄴ|한|된|다)$/.test(text || "");
+
   // 품사가 여러 개면(예: garner=동사/명사) TOEIC 수준에서 헷갈리지 않게 각 품사별 뜻을 따로 보여준다.
-  // 번역이 실패해 다른 품사와 같은 뜻으로 겹치면(예: apple의 동사 뜻이 명사와 같아짐) 정보가
-  // 없는 것과 같으니 제외한다.
+  // 번역이 실패해 다른 품사와 같은 뜻으로 겹치거나(예: apple의 동사 뜻이 명사와 같아짐), 전용
+  // 문형이 없어 bare 번역을 재사용했는데 품사가 안 맞는 형태면 정보가 없는 것과 같으니 제외한다.
   const seenKo = new Set();
   const meanings =
     !dict?.isAmbiguousProperNoun && dict?.senses?.length > 1
       ? dict.senses
-          .map((s) => ({ pos: s.pos, en: s.en, ko: koForPos(s.pos) }))
+          .map((s) => ({ pos: s.pos, en: s.en, ko: koForPos(s.pos), usesBareFallback: s.pos !== "adjective" && s.pos !== "verb" }))
           .filter((m) => {
+            if (m.usesBareFallback && looksLikeAdjectiveOrVerbForm(m.ko)) return false;
             if (seenKo.has(m.ko)) return false;
             seenKo.add(m.ko);
             return true;
           })
+          .map(({ pos, en, ko }) => ({ pos, en, ko }))
       : [];
 
   if (!dict && !picked.text) return null;
