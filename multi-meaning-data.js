@@ -60,4 +60,13 @@ const TOEIC_MULTI_MEANINGS = [
       { pos: "noun", en: "Waste material; trash.", ko: "쓰레기, 폐기물" },
     ],
   },
+  {
+    // "mounting"의 형용사 뜻(증가하는)이 MyMemory에서 거의 안 잡히고, bare/품사 보정 번역
+    // 둘 다 "설치/장착" 쪽 다른 뜻으로 빠져버려서(예: "장착할 예정") 직접 정리해 둠.
+    term: "mounting",
+    meanings: [
+      { pos: "adjective", en: "That continues to mount; steadily rising or accumulating.", ko: "증가하는, 늘어나는" },
+      { pos: "noun", en: "Something mounted to support something; an attachment.", ko: "거치대, 부착물" },
+    ],
+  },
 ];
